@@ -109,13 +109,80 @@ if [[ $open_mode == tab ]]; then
   exit
 fi
 
-# Native workspace mode: let worktrunk create/switch the checkout and run hooks,
-# then register the resulting existing checkout through herdr's worktree API.
+# Resolve the repo's ROOT workspace before starting worktrunk. When the picker
+# runs inside an existing linked-worktree workspace, $HERDR_WORKSPACE_ID names
+# that child workspace, and new worktrees must instead be registered under its
+# repo parent.
+root_ws=$("$herdr" worktree list --cwd "$PWD" --json 2>/dev/null \
+  | jq -r '.result.source.source_workspace_id // empty')
+[[ -z $root_ws ]] && root_ws=$HERDR_WORKSPACE_ID
+
+# Snapshot existing paths so shortcuts and remote refs can still identify the
+# single new worktree they create even when their eventual branch name differs.
+before_paths=$(wt list --format=json 2>/dev/null \
+  | worktrunk_list_worktree_paths_json 2>/dev/null)
+[[ -z $before_paths ]] && before_paths='[]'
+
+# Worktrunk creates and registers the checkout before running blocking pre-start
+# hooks. Watch for that point from a background helper, open the native Herdr
+# workspace, and move this still-running setup pane into a temporary focused tab
+# there. The foreground wt process keeps terminal ownership, so hook approvals
+# and output remain fully interactive across the move.
+focus_setup_when_ready() {
+  local branch=$1 paths_before=$2 parent_pid=$3
+  local list_json wtpath opened ws_id attempt
+
+  [[ -n ${HERDR_PANE_ID:-} ]] || return 0
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    kill -0 "$parent_pid" 2>/dev/null || return 0
+
+    list_json=$(wt list --format=json 2>/dev/null) || true
+    wtpath=$(printf '%s\n' "$list_json" \
+      | worktrunk_started_worktree_path "$branch" "$paths_before" 2>/dev/null) || true
+
+    if [[ -n $wtpath ]]; then
+      opened=$("$herdr" worktree open --workspace "$root_ws" \
+        --path "$wtpath" --label "$branch" --no-focus --json 2>/dev/null) || {
+          sleep 0.1
+          continue
+        }
+      ws_id=$(printf '%s\n' "$opened" \
+        | jq -r '.result.workspace.workspace_id // empty')
+      if [[ -n $ws_id ]]; then
+        "$herdr" pane move "$HERDR_PANE_ID" --new-tab --workspace "$ws_id" \
+          --label setup --focus >/dev/null 2>&1
+      fi
+      return 0
+    fi
+
+    sleep 0.1
+  done
+}
+
+setup_watcher_pid=''
+focus_setup_when_ready "$name" "$before_paths" "$$" &
+setup_watcher_pid=$!
+
+stop_setup_watcher() {
+  [[ -n $setup_watcher_pid ]] || return 0
+  kill "$setup_watcher_pid" 2>/dev/null || true
+  wait "$setup_watcher_pid" 2>/dev/null || true
+  setup_watcher_pid=''
+}
+trap stop_setup_watcher EXIT
+
+# Native workspace mode: let worktrunk create/switch the checkout and run hooks.
+# The watcher above moves this pane to the destination while blocking setup runs;
+# the final open remains the fallback for fast switches and unresolvable refs.
 if ! result=$(wt "${wtargs[@]}" --no-cd --format=json); then
+  stop_setup_watcher
   printf '\n\033[31m%s\033[0m press any key to close' "wt switch failed (see above)."
   read -n1
   exit 1
 fi
+stop_setup_watcher
+trap - EXIT
 
 wtpath=$(printf '%s\n' "$result" | jq -r '.path // empty' 2>/dev/null)
 if [[ -z $wtpath ]]; then
@@ -129,18 +196,6 @@ if [[ -z $wtpath ]]; then
   sleep 2
   exit 1
 fi
-
-# Register the worktree under the repo's ROOT workspace, not the picker pane's
-# current workspace. When the picker runs from inside an existing worktree
-# workspace, $HERDR_WORKSPACE_ID is that worktree's own (linked-worktree)
-# workspace, and `worktree open` rejects it with `linked_worktree_source`
-# ("New and open worktree actions start from the repo parent workspace."), so
-# the checkout never surfaces in the sidebar. herdr resolves the repo's root
-# workspace from any checkout cwd via .result.source.source_workspace_id, so
-# prefer that; fall back to the pane's workspace if it can't be resolved.
-root_ws=$("$herdr" worktree list --cwd "$PWD" --json 2>/dev/null \
-  | jq -r '.result.source.source_workspace_id // empty')
-[[ -z $root_ws ]] && root_ws=$HERDR_WORKSPACE_ID
 
 exec "$herdr" worktree open --workspace "$root_ws" \
   --path "$wtpath" --label "$name" --focus --json

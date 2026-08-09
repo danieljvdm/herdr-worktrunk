@@ -66,6 +66,9 @@ Supported values:
 - `open_mode = "workspace"` — let Worktrunk create or switch the checkout and
   run its hooks, then register that checkout with `herdr worktree open`. Herdr
   displays it as a nested worktree workspace in the sidebar. This is the default.
+  For newly created checkouts, the workspace opens as soon as Git registers it;
+  blocking setup continues visibly in a focused `setup` tab, which closes when
+  Worktrunk finishes.
 - `open_mode = "tab"` — open a new tab in the current workspace and run `wt`
   there. This preserves the original plugin behavior.
 

@@ -41,3 +41,29 @@ worktrunk_list_items() {
     end
   '
 }
+
+# Read `wt list --format=json` on stdin and return the paths of all worktrees as
+# a JSON array. The snapshot lets a caller recognize a newly registered
+# worktree even when the requested token is a shortcut or remote ref whose
+# eventual local branch name differs.
+worktrunk_list_worktree_paths_json() {
+  worktrunk_list_items \
+    | jq -sc '[.[] | select(.kind == "worktree" and .path != null) | .path]'
+}
+
+# Read `wt list --format=json` on stdin and resolve the worktree that appeared
+# for a switch/create operation. Prefer an exact branch match; otherwise accept
+# exactly one path absent from the caller's pre-operation snapshot.
+worktrunk_started_worktree_path() {
+  local branch=$1 before_paths=${2:-[]}
+
+  worktrunk_list_items \
+    | jq -sr --arg branch "$branch" --argjson before "$before_paths" '
+        (map(select(.kind == "worktree" and .branch == $branch)) | first | .path)
+        //
+        ([.[]
+          | select(.kind == "worktree" and .path != null)
+          | select(.path as $path | ($before | index($path)) == null)]
+         | if length == 1 then .[0].path else empty end)
+      '
+}

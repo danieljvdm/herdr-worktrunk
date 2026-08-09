@@ -75,7 +75,39 @@ for list_json in "$schema_one" "$schema_two"; do
     printf 'unexpected normalized worktrunk list items:\n%s\n' "$actual_items" >&2
     exit 1
   fi
+
+  actual_paths=$(printf '%s\n' "$list_json" | worktrunk_list_worktree_paths_json)
+  if [[ $actual_paths != '["/repo","/repo.feature"]' ]]; then
+    printf 'unexpected worktree path snapshot: %s\n' "$actual_paths" >&2
+    exit 1
+  fi
+
+  started_path=$(printf '%s\n' "$list_json" \
+    | worktrunk_started_worktree_path feature '["/repo"]')
+  if [[ $started_path != '/repo.feature' ]]; then
+    printf 'expected exact started path, got %q\n' "$started_path" >&2
+    exit 1
+  fi
+
+  shortcut_path=$(printf '%s\n' "$list_json" \
+    | worktrunk_started_worktree_path 'pr:42' '["/repo"]')
+  if [[ $shortcut_path != '/repo.feature' ]]; then
+    printf 'expected unique new started path, got %q\n' "$shortcut_path" >&2
+    exit 1
+  fi
 done
+
+ambiguous='[
+  {"branch":"main","kind":"worktree","path":"/repo","is_main":true},
+  {"branch":"one","kind":"worktree","path":"/repo.one","is_main":false},
+  {"branch":"two","kind":"worktree","path":"/repo.two","is_main":false}
+]'
+ambiguous_path=$(printf '%s\n' "$ambiguous" \
+  | worktrunk_started_worktree_path 'pr:42' '["/repo"]')
+if [[ -n $ambiguous_path ]]; then
+  printf 'expected ambiguous new paths to remain unresolved, got %q\n' "$ambiguous_path" >&2
+  exit 1
+fi
 
 if printf '%s\n' '{"schema":3}' | worktrunk_list_items >/dev/null 2>&1; then
   printf 'expected unsupported worktrunk list schema to fail\n' >&2

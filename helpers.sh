@@ -29,7 +29,8 @@ worktrunk_list_items() {
       . + {
         kind: (.kind // (if (.worktree | type) == "object" then "worktree" else "branch" end)),
         path: (.path // .worktree.path // null),
-        is_main: (.is_main // .worktree.main // false)
+        is_main: (.is_main // .worktree.main // false),
+        is_current: (.is_current // .worktree.current // false)
       };
 
     if type == "array" then
@@ -40,6 +41,14 @@ worktrunk_list_items() {
       error("unsupported worktrunk list JSON schema")
     end
   '
+}
+
+# Read `wt list --format=json` on stdin and emit the normalized item for the
+# worktree containing the command's current directory.
+worktrunk_current_worktree() {
+  worktrunk_list_items \
+    | jq -c 'select(.kind == "worktree" and .is_current == true)' \
+    | head -n1
 }
 
 # Read `wt list --format=json` on stdin and return the paths of all worktrees as

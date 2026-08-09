@@ -51,28 +51,34 @@ done
 cd - >/dev/null
 
 schema_one='[
-  {"branch":"main","kind":"worktree","path":"/repo","is_main":true},
-  {"branch":"feature","kind":"worktree","path":"/repo.feature","is_main":false},
+  {"branch":"main","kind":"worktree","path":"/repo","is_main":true,"is_current":false},
+  {"branch":"feature","kind":"worktree","path":"/repo.feature","is_main":false,"is_current":true},
   {"branch":"ready","kind":"branch"}
 ]'
 schema_two='{
   "schema":2,
   "items":[
-    {"branch":"main","worktree":{"path":"/repo","main":true}},
-    {"branch":"feature","worktree":{"path":"/repo.feature","main":false}},
+    {"branch":"main","worktree":{"path":"/repo","main":true,"current":false}},
+    {"branch":"feature","worktree":{"path":"/repo.feature","main":false,"current":true}},
     {"branch":"ready"}
   ]
 }'
-expected_items='main|worktree|/repo|true
-feature|worktree|/repo.feature|false
-ready|branch|null|false'
+expected_items='main|worktree|/repo|true|false
+feature|worktree|/repo.feature|false|true
+ready|branch|null|false|false'
 
 for list_json in "$schema_one" "$schema_two"; do
   actual_items=$(printf '%s\n' "$list_json" \
     | worktrunk_list_items \
-    | jq -r '[.branch, .kind, (.path | tostring), (.is_main | tostring)] | join("|")')
+    | jq -r '[.branch, .kind, (.path | tostring), (.is_main | tostring), (.is_current | tostring)] | join("|")')
   if [[ $actual_items != "$expected_items" ]]; then
     printf 'unexpected normalized worktrunk list items:\n%s\n' "$actual_items" >&2
+    exit 1
+  fi
+
+  current_item=$(printf '%s\n' "$list_json" | worktrunk_current_worktree)
+  if [[ $(printf '%s\n' "$current_item" | jq -r '.branch') != feature ]]; then
+    printf 'expected feature to be the current worktree, got %s\n' "$current_item" >&2
     exit 1
   fi
 

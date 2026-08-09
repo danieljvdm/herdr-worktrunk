@@ -22,7 +22,7 @@ resulting worktree opens as a tab or as a native linked-worktree workspace.
 
 ## What it does
 
-Three workspace actions:
+Four workspace actions:
 
 - **Worktree: switch / create from default branch** — opens an fzf picker over
   your existing worktrees and local branches without worktrees (remote-tracking
@@ -38,11 +38,15 @@ Both create actions support [worktrunk syntax for PR/MR along with other shortcu
 Worktrunk's lifecycle hooks run in either presentation mode, and the checkout
 opens as a tab or a native worktree workspace according to plugin configuration.
 
-- **Worktree: remove** — opens an fzf picker over removable worktrees
-  (everything except the main checkout). Pick one; worktrunk prompts for
-  confirmation and gates unmerged branches / untracked files itself, then
-  removes it. The native workspace or any legacy tab panes associated with the
-  deleted worktree are closed automatically.
+- **Worktree: remove current** — removes the worktree containing the focused
+  workspace without opening a picker. Worktrunk still applies its dirty/unmerged
+  safeguards; on success, the associated Herdr workspace closes.
+
+- **Worktree: remove any** — opens an fzf picker over removable worktrees
+  (everything except the main checkout). Pick one; worktrunk gates unmerged
+  branches and untracked files itself, then removes it. The native workspace or
+  any legacy tab panes associated with the deleted worktree are closed
+  automatically.
 
 ## Worktree presentation
 
@@ -124,7 +128,12 @@ herdr plugin action invoke open --plugin worktrunk
 herdr plugin action invoke open-current --plugin worktrunk
 ```
 
-### Remove Worktree
+### Remove Current Worktree
+```
+herdr plugin action invoke remove-current --plugin worktrunk
+```
+
+### Remove Any Worktree
 ```
 herdr plugin action invoke remove --plugin worktrunk
 ```
@@ -155,16 +164,19 @@ description = "Worktree: switch / create from current branch"
 [[keys.command]]
 key = "prefix+shift+d"
 type = "plugin_action"
-command = "worktrunk.remove"
-description = "Worktree: remove"
+command = "worktrunk.remove-current"
+description = "Worktree: remove current"
 ```
+
+The remove-any picker remains available through the action list as
+`worktrunk.remove`; bind it separately only if you use it frequently.
 
 **Recommended:** override herdr's built-in worktree management with these. herdr
 binds `prefix+shift+g` to "new worktree" by default, and a custom keybinding takes
 precedence over the built-in on the same key — so mapping `worktrunk.open`
 to `prefix+shift+g` replaces it with worktrunk's switch/create picker, hooks
-included. Pick matching keys for `worktrunk.open-current` and `worktrunk.remove`
-to round out the workflow.
+included. Pick matching keys for `worktrunk.open-current` and
+`worktrunk.remove-current` to round out the workflow.
 
 Reload the config after editing it:
 

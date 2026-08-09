@@ -7,13 +7,22 @@ if ! command -v fzf >/dev/null; then
   printf '\033[31m%s\033[0m\n' "fzf not found on PATH"; sleep 2; exit 1
 fi
 
+plugin_root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}
+# shellcheck source=./helpers.sh
+source "$plugin_root/helpers.sh"
+
 herdr=${HERDR_BIN_PATH:-herdr}
-wtjson=$(wt list --format=json 2>/dev/null)
+if ! wtjson=$(wt list --format=json 2>/dev/null); then
+  printf '\033[31m%s\033[0m\n' "failed to list worktrees"; sleep 2; exit 1
+fi
+if ! wtitems=$(printf '%s\n' "$wtjson" | worktrunk_list_items); then
+  printf '\033[31m%s\033[0m\n' "unsupported worktrunk list output"; sleep 2; exit 1
+fi
 
 # Removable = any real worktree except the main one (the primary checkout can't be
 # removed). The current worktree IS removable — wt switches you back to the root repo.
-cands=$(printf '%s\n' "$wtjson" \
-  | jq -r '.[] | select(.branch != null and .is_main != true) | .branch')
+cands=$(printf '%s\n' "$wtitems" \
+  | jq -r 'select(.kind == "worktree" and .branch != null and .is_main != true) | .branch')
 if [[ -z $cands ]]; then
   printf '\033[33m%s\033[0m\n' "No removable worktrees (only the main worktree exists)."; sleep 2; exit 0
 fi
@@ -25,7 +34,8 @@ name=$(printf '%s\n' "$cands" \
 [[ -z $name ]] && exit 0      # esc / no selection → cancel
 
 # Path and native herdr workspace (if open) of the worktree we're about to remove.
-wtpath=$(printf '%s\n' "$wtjson" | jq -r --arg b "$name" '.[] | select(.branch==$b) | .path')
+wtpath=$(printf '%s\n' "$wtitems" \
+  | jq -r --arg b "$name" 'select(.kind == "worktree" and .branch == $b) | .path')
 wsid=$("$herdr" worktree list --cwd "$PWD" --json 2>/dev/null \
   | jq -r --arg p "$wtpath" \
       '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty' \

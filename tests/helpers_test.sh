@@ -50,4 +50,36 @@ done
 
 cd - >/dev/null
 
+schema_one='[
+  {"branch":"main","kind":"worktree","path":"/repo","is_main":true},
+  {"branch":"feature","kind":"worktree","path":"/repo.feature","is_main":false},
+  {"branch":"ready","kind":"branch"}
+]'
+schema_two='{
+  "schema":2,
+  "items":[
+    {"branch":"main","worktree":{"path":"/repo","main":true}},
+    {"branch":"feature","worktree":{"path":"/repo.feature","main":false}},
+    {"branch":"ready"}
+  ]
+}'
+expected_items='main|worktree|/repo|true
+feature|worktree|/repo.feature|false
+ready|branch|null|false'
+
+for list_json in "$schema_one" "$schema_two"; do
+  actual_items=$(printf '%s\n' "$list_json" \
+    | worktrunk_list_items \
+    | jq -r '[.branch, .kind, (.path | tostring), (.is_main | tostring)] | join("|")')
+  if [[ $actual_items != "$expected_items" ]]; then
+    printf 'unexpected normalized worktrunk list items:\n%s\n' "$actual_items" >&2
+    exit 1
+  fi
+done
+
+if printf '%s\n' '{"schema":3}' | worktrunk_list_items >/dev/null 2>&1; then
+  printf 'expected unsupported worktrunk list schema to fail\n' >&2
+  exit 1
+fi
+
 printf 'helpers tests passed\n'

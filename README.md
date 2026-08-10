@@ -52,10 +52,15 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   Branch naming: set `branch_name_command` in the plugin config to any shell
   command that reads the task text on stdin and prints a branch name on
   stdout (keep the value a simple string — point it at a script for anything
-  involved). Without it, `claude --model haiku -p` names the branch; if
-  neither works (or takes over 20s), the fallback is a slug of the task's
-  first words. Model output is sanitized to a plausible branch name either
-  way.
+  involved, including conventions like a `you/` branch prefix). Without it,
+  `claude --model haiku -p` names the branch; if neither works (or takes over
+  20s), the fallback is a slug of the task's first words. Model output is
+  sanitized to a plausible branch name either way.
+
+  Focus: dispatch switches to the new workspace by default. Set
+  `dispatch_focus = false` in the plugin config to keep working where you
+  are — the workspace opens in the background and a notification announces
+  the agent instead. `--focus` / `--no-focus` override per invocation.
 
   The engine behind the overlay is `dispatch.sh`, which is also a standalone
   CLI — alias it (e.g. `sow`) to dispatch from any shell or coding agent:

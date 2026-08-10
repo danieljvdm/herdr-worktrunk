@@ -74,3 +74,26 @@ worktrunk_default_agent() {
     printf '%s\n' claude
   fi
 }
+
+# Print "true"/"false" for whether dispatch.sh focuses the new worktree
+# workspace. Focused by default; set dispatch_focus = false to keep working
+# where you are and get a notification instead. The --focus / --no-focus
+# flags override per invocation.
+worktrunk_dispatch_focus() {
+  local value
+
+  value=$(worktrunk_config_value dispatch_focus)
+
+  case "$value" in
+    ""|true)
+      printf '%s\n' true
+      ;;
+    false)
+      printf '%s\n' false
+      ;;
+    *)
+      printf '\033[33mWarning:\033[0m unsupported dispatch_focus %q; focusing\n' "$value" >&2
+      printf '%s\n' true
+      ;;
+  esac
+}

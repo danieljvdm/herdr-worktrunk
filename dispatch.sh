@@ -19,8 +19,10 @@
 #   -b, --branch NAME  branch/worktree name (default: model-named from the task)
 #       --base REF     base ref for a newly created branch (worktrunk syntax)
 #       --here         shorthand for --base @ (current branch)
+#       --focus        switch to the new workspace when it opens
 #       --no-focus     open the workspace without stealing focus, and announce
-#                      via a herdr notification instead
+#                      via a herdr notification instead; the default comes
+#                      from the dispatch_focus plugin config key (true)
 #       --hold         on failure, wait for a keypress before exiting (for
 #                      transient plugin panes)
 #       --slug TEXT    print the branch name derived from TEXT and exit
@@ -135,7 +137,7 @@ parse_grammar() {
 agent_kind=''
 branch=''
 base=''
-focus=true
+focus=$(worktrunk_dispatch_focus)
 task=''
 stdin_task=false
 
@@ -146,6 +148,7 @@ while [[ $# -gt 0 ]]; do
     -b|--branch) branch=${2:?--branch needs a name}; shift 2 ;;
     --base) base=${2:?--base needs a ref}; shift 2 ;;
     --here) base='@'; shift ;;
+    --focus) focus=true; shift ;;
     --no-focus) focus=false; shift ;;
     --hold) hold=true; shift ;;
     --slug) shift; worktrunk_slug "$*" || die "no branch name derivable from: $*"; exit 0 ;;
@@ -155,7 +158,7 @@ while [[ $# -gt 0 ]]; do
       preview_agent=${grammar_agent:-$(worktrunk_default_agent)}
       printf 'branch: %s · agent: %s\n' "${preview_branch:-—}" "$preview_agent"
       exit 0 ;;
-    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -) stdin_task=true; shift ;;
     --) shift; task="$*"; break ;;
     -*) die "unknown option: $1" ;;

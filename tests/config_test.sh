@@ -53,4 +53,23 @@ assert_remote false
 printf 'show_remote_branches = maybe\n' > "$config_dir/config.toml"   # unsupported → default
 assert_remote false
 
+
+assert_dispatch_focus() {
+  local expected=$1 actual
+  actual=$(worktrunk_dispatch_focus 2>/dev/null)
+  if [[ $actual != "$expected" ]]; then
+    printf 'expected dispatch_focus %q, got %q\n' "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
+rm -f "$config_dir/config.toml"
+assert_dispatch_focus true
+
+printf 'dispatch_focus = false\n' > "$config_dir/config.toml"
+assert_dispatch_focus false
+
+printf 'dispatch_focus = "banana"\n' > "$config_dir/config.toml"
+assert_dispatch_focus true
+
 printf 'config tests passed\n'

@@ -278,23 +278,35 @@ for _ in $(seq 1 30); do
 done
 [[ $started == false ]] && die "agent start failed: $start_err"
 
-# A just-started agent can race a startup dialog (e.g. claude's workspace-trust
-# prompt for the brand-new worktree directory) that swallows the first
-# submission. Verify the task text actually reached the agent's transcript and
-# retry when it did not — but stop typing into a dialog herdr reports as
-# blocked; that one needs a human.
+# A just-started agent can mishandle the first submission in two ways: a
+# startup dialog (e.g. claude's workspace-trust prompt for the brand-new
+# worktree directory) swallows text and Enter entirely, or the TUI accepts
+# the pasted text into its input box but drops the Enter, leaving the task
+# composed-but-unsent. An idle agent doesn't start working on its own, so
+# reaching `working` is the only positive proof of submission. When it
+# doesn't come, nudge a bare Enter first — it flushes a stuck input box and
+# is a no-op on an empty one — before trusting the transcript (which renders
+# a stuck input box identically) or re-typing the task. Stop typing into a
+# dialog herdr reports as blocked; that one needs a human.
 snippet=$(printf '%s' "$task" | head -n1 | cut -c1-40)
 submitted=false
 agent_status=''
-for _ in 1 2 3; do
+for attempt in 1 2 3; do
+  if [[ $attempt -gt 1 ]]; then
+    sleep 1
+  fi
   "$herdr" agent prompt "$agent_name" "$task" >/dev/null 2>&1 || true
-  # An idle agent doesn't start working on its own: reaching `working` proves
-  # the submission landed. A turn faster than the wait window settles back to
-  # idle instead, so fall back to finding the task text in the transcript.
   if "$herdr" agent wait "$agent_name" --until working --timeout 5000 >/dev/null 2>&1; then
     submitted=true
     break
   fi
+  "$herdr" agent send-keys "$agent_name" enter >/dev/null 2>&1 || true
+  if "$herdr" agent wait "$agent_name" --until working --timeout 3000 >/dev/null 2>&1; then
+    submitted=true
+    break
+  fi
+  # Fast turns settle back to idle before the waits fire; after the Enter
+  # nudge the transcript match can no longer be a stuck input box.
   if "$herdr" agent read "$agent_name" --source recent-unwrapped --lines 200 2>/dev/null \
     | grep -qF "$snippet"; then
     submitted=true
@@ -303,7 +315,6 @@ for _ in 1 2 3; do
   agent_status=$("$herdr" agent get "$agent_name" 2>/dev/null \
     | jq -r '.result.agent.agent_status // empty')
   [[ $agent_status == blocked ]] && break
-  sleep 1
 done
 if [[ $submitted == false ]]; then
   "$herdr" notification show "🌱 $branch needs attention" \

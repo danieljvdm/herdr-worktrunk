@@ -50,13 +50,10 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   change the default agent (claude). Inside the switch/create pickers,
   `ctrl-o` promotes the highlighted or typed branch into the same composer.
 
-  Images: when the clipboard holds an image, the composer saves it and swaps
-  the clipboard for an inline `[image]` marker — a plain paste (cmd+v) drops
-  `[image]` into the text, and on submit it becomes the saved image's path,
-  which coding agents read natively. The original image is restored to the
-  clipboard on exit, submit or cancel. A typed `!img` token works too, and
-  captures late (an image copied after the composer opened). Needs
-  `pngpaste` (macOS), `wl-paste`, or `xclip`.
+  Images: paste them. herdr intercepts image pastes in any pane, saves the
+  image, and injects the saved file's path into the composer; on submit each
+  path is wrapped as an attachment note so the sown agent knows to read it.
+  Multiple pastes attach multiple images.
 
   The action carries both `workspace` and `global` contexts. From a focused
   workspace, that workspace's repo is the target. Invoked with no workspace

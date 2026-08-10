@@ -191,18 +191,3 @@ worktrunk_root_workspace() {
   printf '%s\n' "$ws"
 }
 
-# Save the clipboard image to DEST (png). Tries pngpaste (macOS), wl-paste
-# (Wayland), then xclip (X11). Fails when the clipboard holds no image.
-worktrunk_clipboard_image() {
-  local dest=$1
-  if command -v pngpaste >/dev/null; then
-    pngpaste "$dest" 2>/dev/null
-  elif command -v wl-paste >/dev/null; then
-    wl-paste --type image/png > "$dest" 2>/dev/null
-  elif command -v xclip >/dev/null; then
-    xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null
-  else
-    return 1
-  fi
-  [[ -s $dest ]] || { rm -f "$dest"; return 1; }
-}

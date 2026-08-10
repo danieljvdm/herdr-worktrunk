@@ -59,42 +59,12 @@ else
   hint_line="@agent / name: on the first line override · esc cancels"
 fi
 
-# Clipboard image shim: when an image is on the clipboard, save it to a file
-# now and swap the clipboard's contents for an inline `[image]` marker — so a
-# plain cmd+v pastes `[image]` into the textarea. The marker (and a typed
-# `!img`) becomes the saved path on submit, and the original image is
-# restored to the clipboard on exit either way, so cancelling loses nothing.
-clip_set_text() {
-  if command -v pbcopy >/dev/null; then pbcopy
-  elif command -v wl-copy >/dev/null; then wl-copy
-  elif command -v xclip >/dev/null; then xclip -selection clipboard
-  else cat >/dev/null; return 1
-  fi
-}
-
-clip_restore_image() {
-  local path=$1
-  if command -v osascript >/dev/null; then
-    osascript -e "set the clipboard to (read (POSIX file \"$path\") as «class PNGf»)" >/dev/null 2>&1
-  elif command -v wl-copy >/dev/null; then
-    wl-copy --type image/png < "$path" 2>/dev/null
-  elif command -v xclip >/dev/null; then
-    xclip -selection clipboard -t image/png -i "$path" 2>/dev/null
-  fi
-}
-
-img_path=''
-clip_shimmed=false
-maybe_img="${TMPDIR:-/tmp}/sow-image-$(date +%s)-$$.png"
-if worktrunk_clipboard_image "$maybe_img"; then
-  img_path=$maybe_img
-  if printf '[image]' | clip_set_text; then
-    clip_shimmed=true
-    trap '[[ $clip_shimmed == true ]] && clip_restore_image "$img_path"' EXIT
-    hint_line="📋 paste drops [image] inline · $hint_line"
-  else
-    hint_line="📋 clipboard image — !img attaches it · $hint_line"
-  fi
+# Image pastes need nothing from us: herdr intercepts them in any pane,
+# saves the image, and injects the saved file's path as text. The hint just
+# advertises it when the clipboard actually holds an image; the bare paths
+# are wrapped for the agent after submit.
+if command -v pngpaste >/dev/null && pngpaste - >/dev/null 2>&1; then
+  hint_line="📋 paste attaches your clipboard image · $hint_line"
 fi
 
 if command -v gum >/dev/null; then
@@ -122,22 +92,10 @@ fi
 
 [[ -z ${task//[[:space:]]/} ]] && exit 0
 
-# Pasted `[image]` markers and typed `!img` tokens both become the saved
-# image's path; every occurrence gets the same image (there is one
-# clipboard), and the file outlives the popup so the sown agent can read it.
-# `!img` with nothing captured at open retries the clipboard now, covering
-# an image copied while the composer was already up.
-if [[ -n $img_path ]]; then
-  task=${task//'[image]'/"[attached image — read $img_path]"}
-  task=${task//'!img'/"[attached image — read $img_path]"}
-elif [[ $task == *'!img'* ]]; then
-  img_path="${TMPDIR:-/tmp}/sow-image-$(date +%s)-$$.png"
-  if worktrunk_clipboard_image "$img_path"; then
-    task=${task//'!img'/"[attached image — read $img_path]"}
-  else
-    fail "the task references !img but the clipboard has no image"
-  fi
-fi
+# Image pastes arrive as bare paths under herdr's clipboard-images dir; wrap
+# each so the sown agent knows to read them.
+task=$(printf '%s' "$task" \
+  | sed -E 's#(/[^[:space:]]*/herdr-clipboard-images-[^[:space:]]+\.(png|jpe?g|webp|gif))#[attached image — read \1]#g')
 
 # Grammar is resolved here (dispatch's stdin mode takes the task verbatim);
 # explicit flags below carry the parsed pieces to the runner.

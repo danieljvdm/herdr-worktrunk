@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Task composer for the worktrunk herdr plugin: a one-line prompt where you
-# describe the work. The header live-previews the branch name derived from
-# your text and the agent that will pick it up; Enter dispatches through
-# dispatch.sh in this same pane, so worktrunk hook output stays visible.
+# describe the work. Enter dispatches through dispatch.sh in this same pane,
+# so branch naming and worktrunk hook output stay visible. The header is
+# static on purpose — a per-keystroke transform means a process spawn per
+# character, which makes typing visibly laggy.
 #
 # Inline grammar (parsed by dispatch.sh, shown live in the header):
 #   @claude / @codex / @KIND   pick the agent
@@ -26,19 +27,16 @@ hint_line="@claude / @codex picks the agent · name: picks the branch · esc can
 if [[ -n $branch_hint ]]; then
   header_line="branch: $branch_hint · agent: $default_agent"
 else
-  header_line="branch: (derived from task) · agent: $default_agent"
+  header_line="branch: named from your task · agent: $default_agent"
 fi
 
 if command -v fzf >/dev/null; then
-  preview_cmd="WORKTRUNK_BRANCH_HINT=$(printf '%q' "$branch_hint") \
-bash $(printf '%q' "$plugin_root/dispatch.sh") --preview {q}"
   task=$(
     : | fzf --disabled --print-query --no-info --reverse \
         --border=rounded --margin=20%,15% \
         --prompt='sow ❯ ' \
         --header="$header_line
-$hint_line" \
-        --bind "change:transform-header:$preview_cmd; echo $(printf '%q' "$hint_line")"
+$hint_line"
   )
   ret=$?
   [[ $ret -gt 1 ]] && exit 0   # esc/abort → cancel (1 = accepted with no match list, expected)

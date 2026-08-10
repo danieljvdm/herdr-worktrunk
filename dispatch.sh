@@ -4,8 +4,9 @@
 # as a native herdr worktree workspace, starts a coding agent in its root
 # pane, and submits the task as the agent's opening prompt.
 #
-# The branch name is derived from the task text unless overridden — the task
-# is the primitive, the branch is bookkeeping.
+# The branch name comes from a fast model call over the task text unless
+# overridden (config key branch_name_command, else claude haiku, else a slug
+# of the text) — the task is the primitive, the branch is bookkeeping.
 #
 # Usage: dispatch.sh [options] [--] <task text...>
 #        dispatch.sh [options] -            # read task text from stdin
@@ -15,7 +16,7 @@
 #                      plugin config `default_agent`, else claude
 #       --claude       shorthand for --agent claude
 #       --codex        shorthand for --agent codex
-#   -b, --branch NAME  branch/worktree name (default: derived from task text)
+#   -b, --branch NAME  branch/worktree name (default: model-named from the task)
 #       --base REF     base ref for a newly created branch (worktrunk syntax)
 #       --here         shorthand for --base @ (current branch)
 #       --no-focus     open the workspace without stealing focus, and announce
@@ -51,6 +52,44 @@ die() {
     read -rn1
   fi
   exit 1
+}
+
+# Run a command with a hard wall-clock budget; macOS ships no `timeout`.
+run_with_timeout() {
+  local secs=$1 pid watcher rc
+  shift
+  "$@" &
+  pid=$!
+  ( sleep "$secs"; kill "$pid" 2>/dev/null ) &
+  watcher=$!
+  wait "$pid"
+  rc=$?
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  return "$rc"
+}
+
+# Name the branch from the task with a model: the configured
+# branch_name_command (task on stdin, name on stdout), else claude's haiku
+# tier. Output is sanitized to a plausible branch name; empty/failed output
+# falls back to worktrunk_slug at the call site.
+name_branch_with_model() {
+  local task=$1 cmd out
+  cmd=$(worktrunk_config_value branch_name_command)
+  if [[ -n $cmd ]]; then
+    out=$(printf '%s\n' "$task" | run_with_timeout 20 bash -c "$cmd" 2>/dev/null)
+  elif command -v claude >/dev/null 2>&1; then
+    out=$(printf 'Task: %s\n' "$task" | run_with_timeout 20 claude --model haiku -p \
+      'Reply with only a kebab-case git branch name (two to four words, lowercase letters/digits/dashes, max 40 chars) that describes this task. No quotes, no explanation, nothing else.' \
+      2>/dev/null)
+  else
+    return 1
+  fi
+  out=$(printf '%s' "$out" | tail -n1 | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._/-' '-')
+  out=$(printf '%s' "$out" | sed 's/^[^a-z0-9]*//; s/[^a-z0-9]*$//; s/-\{2,\}/-/g')
+  out=${out:0:40}
+  [[ -n $out ]] || return 1
+  printf '%s\n' "$out"
 }
 
 # Derive a branch name from task text: lowercase, alphanumeric words, minus
@@ -112,11 +151,11 @@ while [[ $# -gt 0 ]]; do
     --slug) shift; worktrunk_slug "$*" || die "no branch name derivable from: $*"; exit 0 ;;
     --preview) shift
       parse_grammar "$*"
-      preview_branch=${grammar_branch:-${WORKTRUNK_BRANCH_HINT:-$(worktrunk_slug "$task" 2>/dev/null || true)}}
+      preview_branch=${grammar_branch:-${WORKTRUNK_BRANCH_HINT:-(model-named)}}
       preview_agent=${grammar_agent:-$(worktrunk_default_agent)}
       printf 'branch: %s · agent: %s\n' "${preview_branch:-—}" "$preview_agent"
       exit 0 ;;
-    -h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -) stdin_task=true; shift ;;
     --) shift; task="$*"; break ;;
     -*) die "unknown option: $1" ;;
@@ -137,14 +176,20 @@ fi
 [[ -n ${HERDR_WORKSPACE_ID:-} ]] || die "sow only works inside a herdr session"
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository: $PWD"
 
-# Branch: explicit > hint > derived from the task. A derived name that already
-# exists gets a numeric suffix — a new task deserves a new worktree.
+# Branch: explicit > hint > named by a model from the task (slug of the task
+# text as last resort). A derived name that already exists gets a numeric
+# suffix — a new task deserves a new worktree.
 derived=false
 if [[ -z $branch ]]; then
   branch=${WORKTRUNK_BRANCH_HINT:-}
 fi
 if [[ -z $branch ]]; then
-  branch=$(worktrunk_slug "$task") || die "could not derive a branch name; pass -b NAME"
+  printf '\033[2m» naming the branch…\033[0m\n'
+  branch=$(name_branch_with_model "$task" || true)
+  if [[ -z $branch ]]; then
+    branch=$(worktrunk_slug "$task") || die "could not derive a branch name; pass -b NAME"
+    printf '\033[2m» model naming unavailable; falling back to: %s\033[0m\n' "$branch"
+  fi
   derived=true
   if worktrunk_ref_exists "$branch"; then
     for i in 2 3 4 5 6 7 8 9; do

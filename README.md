@@ -39,15 +39,23 @@ Worktrunk's lifecycle hooks run in either presentation mode, and the checkout
 opens as a tab or a native worktree workspace according to plugin configuration.
 
 - **Sow: worktree + agent from a task prompt** — task-first dispatch. A
-  centered overlay asks you to describe the work; the branch name is derived
-  live from your text (shown in the header as you type), the worktree is
-  created through `wt` (hooks run), it opens as a native worktree workspace,
-  and a coding agent starts in its root pane with your task as the opening
-  prompt. Inline grammar: start with `@claude` / `@codex` (any `herdr agent
-  start` kind) to pick the agent, or `some-branch-name:` to pick the branch.
-  Set `default_agent = "codex"` in the plugin config to change the default
-  (claude). Inside the switch/create pickers, `ctrl-o` promotes the highlighted
-  or typed branch into the same composer.
+  centered overlay asks you to describe the work; a fast model call names the
+  branch from your text, the worktree is created through `wt` (hooks run), it
+  opens as a native worktree workspace, and a coding agent starts in its root
+  pane with your task as the opening prompt. Inline grammar: start with
+  `@claude` / `@codex` (any `herdr agent start` kind) to pick the agent, or
+  `some-branch-name:` to pick the branch yourself. Set `default_agent =
+  "codex"` in the plugin config to change the default agent (claude). Inside
+  the switch/create pickers, `ctrl-o` promotes the highlighted or typed branch
+  into the same composer.
+
+  Branch naming: set `branch_name_command` in the plugin config to any shell
+  command that reads the task text on stdin and prints a branch name on
+  stdout (keep the value a simple string — point it at a script for anything
+  involved). Without it, `claude --model haiku -p` names the branch; if
+  neither works (or takes over 20s), the fallback is a slug of the task's
+  first words. Model output is sanitized to a plausible branch name either
+  way.
 
   The engine behind the overlay is `dispatch.sh`, which is also a standalone
   CLI — alias it (e.g. `sow`) to dispatch from any shell or coding agent:

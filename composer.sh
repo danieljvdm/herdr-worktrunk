@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Task composer for the worktrunk herdr plugin. Collects the task in a compact
-# popup: a single-line fzf with inline >repo typeahead first, and ctrl+e
-# expands into a multiline gum textarea seeded with the typed text (enter
-# submits in both stages). Dispatch then runs in a background "sow" tab of
-# the target repo's root workspace and the popup exits, so it never blocks
-# on worktree hooks or branch naming. (The runner must be a herdr pane of
-# its own: a pane's children die with it, so a nohup'd child would not
-# survive this popup closing.)
+# Task composer for the worktrunk herdr plugin. The target repo is settled
+# first — the caller's workspace repo, or (global invocations) an fzf picker
+# over open repos with the focused repo on top so bare Enter passes through —
+# and then the task is composed in a multiline gum textarea filling the
+# popup. One widget per job: the picker owns repo typeahead, the textarea
+# owns the writing. Dispatch then runs in a background "sow" tab of the
+# target repo's root workspace and the popup exits, so it never blocks on
+# worktree hooks or branch naming. (The runner must be a herdr pane of its
+# own: a pane's children die with it, so a nohup'd child would not survive
+# this popup closing.)
 #
 # Inline grammar (parsed here via helpers, resolved before detaching):
 #   @claude / @codex / @KIND   pick the agent
@@ -43,63 +45,62 @@ fail() {
   exit 1
 }
 
-hint_line="@agent · name: picks branch · >repo targets · esc cancels"
+# fzf over open repos, focused repo on top so bare Enter passes through.
+# Prints the chosen path; returns nonzero on esc/no repos.
+composer_pick_repo() {
+  local repos focused focused_root choice
+  repos=$(worktrunk_open_repos)
+  [[ -z $repos ]] && return 1
+  focused=$("$herdr" pane current 2>/dev/null \
+    | jq -r '[.. | objects | .cwd? // empty] | first // empty')
+  focused_root=''
+  if [[ -n $focused ]]; then
+    focused_root=$(git -C "$focused" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    focused_root=${focused_root%/.git}
+  fi
+  choice=$(
+    {
+      [[ -n $focused_root ]] && printf '%s\n' "$repos" | awk -F'\t' -v f="$focused_root" '$1 == f'
+      printf '%s\n' "$repos" | awk -F'\t' -v f="$focused_root" '$1 != f'
+    } | fzf --with-nth=2 --delimiter=$'\t' --reverse --no-info \
+          --border=rounded --margin=0,1 --prompt='repo ❯ ' \
+          --header='where does this task go? · ↵ pick · esc cancel'
+  ) || return 1
+  printf '%s\n' "${choice%%$'\t'*}"
+}
+
+# Target repo first: the caller's workspace repo, or a picker when invoked
+# globally. The textarea header then names the settled target.
 if [[ -n $global_mode ]]; then
-  header_line="global sow · agent: $default_agent"
-elif [[ -n $branch_hint ]]; then
-  header_line="branch: $branch_hint · agent: $default_agent"
+  repo_path=$(composer_pick_repo) || exit 0
 else
-  header_line="branch: named from your task · agent: $default_agent"
+  repo_path=$PWD
 fi
+repo_name=$(git -C "$repo_path" rev-parse --show-toplevel 2>/dev/null)
+repo_name=${repo_name##*/}
 
-repos_tmp=$(mktemp "${TMPDIR:-/tmp}/sow-repos.XXXXXX")
-trap 'rm -f "$repos_tmp"' EXIT
-worktrunk_open_repos | cut -f2 > "$repos_tmp"
-if [[ -n $global_mode ]]; then
-  repo_names=$(tr '\n' ' ' < "$repos_tmp")
-  [[ -n $repo_names ]] && hint_line+=$'\n'"open: ${repo_names:0:70}"
-fi
+header_line="→ ${repo_name:-$repo_path} · agent: $default_agent"
+[[ -n $branch_hint ]] && header_line+=" · branch: $branch_hint"
+hint_line="@agent / name: on the first line override · esc cancels"
 
-have_gum=false
-command -v gum >/dev/null && have_gum=true
-
-if command -v fzf >/dev/null; then
-  [[ $have_gum == true ]] && hint_line+=" · ctrl+e multiline"
-  candidates_bind="change:reload(sh $(printf '%q' "$plugin_root/repo-candidates.sh") {q} $(printf '%q' "$repos_tmp"))"
-  # Enter completes like tab while a bare >token has a highlighted candidate
-  # (a bare token is never a dispatchable task); otherwise it accepts.
-  enter_bind='enter:transform:q={q}; sel={}; case "$q" in ">"*" "*) echo accept ;; ">"*) if [ -n "$sel" ]; then echo replace-query; else echo accept; fi ;; *) echo accept ;; esac'
-  out=$(
-    : | fzf --disabled --print-query --expect=ctrl-e --no-info --reverse \
+if command -v gum >/dev/null; then
+  task=$(
+    gum write --width 74 --height 10 --char-limit 0 --show-help \
+      --header "$header_line
+$hint_line" \
+      --placeholder 'describe the task…'
+  ) || exit 0
+elif command -v fzf >/dev/null; then
+  task=$(
+    : | fzf --disabled --print-query --no-info --reverse \
         --border=rounded --margin=0,1 \
         --prompt='sow ❯ ' \
-        --bind "$candidates_bind" \
-        --bind 'tab:replace-query' \
-        --bind "$enter_bind" \
         --header="$header_line
 $hint_line"
   )
   ret=$?
   [[ $ret -gt 1 ]] && exit 0   # esc/abort → cancel (1 = accepted with no match list, expected)
-  # --print-query + --expect: line 1 = typed text, line 2 = accepting key.
-  task=$(printf '%s\n' "$out" | sed -n 1p)
-  pressed=$(printf '%s\n' "$out" | sed -n 2p)
-  if [[ $pressed == ctrl-e && $have_gum == true ]]; then
-    task=$(
-      gum write --width 74 --height 9 --char-limit 0 --show-help \
-        --value "$task" \
-        --header "$header_line
-$hint_line" \
-        --placeholder 'describe the task…'
-    ) || exit 0
-  fi
-elif [[ $have_gum == true ]]; then
-  task=$(
-    gum write --width 74 --height 9 --char-limit 0 --show-help \
-      --header "$header_line
-$hint_line" \
-      --placeholder 'describe the task…'
-  ) || exit 0
+  task=$(printf '%s\n' "$task" | sed -n 1p)
 else
   printf '%s\n%s\n' "$header_line" "$hint_line"
   read -er -p 'sow ❯ ' task
@@ -108,15 +109,12 @@ fi
 [[ -z ${task//[[:space:]]/} ]] && exit 0
 
 # Grammar is resolved here (dispatch's stdin mode takes the task verbatim);
-# explicit flags below carry the parsed pieces to the runner.
+# explicit flags below carry the parsed pieces to the runner. A >token still
+# overrides the settled target for power use, with a seeded picker when it
+# does not uniquely resolve.
 parse_grammar "$task"
-
-# Target repo: >token > current workspace repo > (global) task-text mention
-# or interactive picker while the popup still owns the terminal.
-repo_path=''
 if [[ -n $grammar_repo ]]; then
   if ! repo_path=$(resolve_repo_token "$grammar_repo"); then
-    # Ambiguous or unknown token → picker seeded with it rather than an error.
     repo_path=$(worktrunk_open_repos \
       | fzf --with-nth=2 --delimiter=$'\t' --query "$grammar_repo" \
             --reverse --no-info --border=rounded --prompt='repo ❯ ' \
@@ -124,13 +122,6 @@ if [[ -n $grammar_repo ]]; then
       || exit 0
     repo_path=${repo_path%%$'\t'*}
   fi
-elif [[ -z $global_mode ]]; then
-  repo_path=$PWD
-else
-  repo_path=$(pick_repo_for_task "$task")
-  pick_rc=$?
-  [[ $pick_rc -eq 130 ]] && exit 0
-  [[ $pick_rc -ne 0 || -z $repo_path ]] && fail "could not resolve a target repository"
 fi
 
 root_ws=$(worktrunk_root_workspace "$repo_path") \

@@ -1,6 +1,6 @@
 id = "worktrunk"
 name = "Worktrunk"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.7.0"
 description = "Switch, create, or remove git worktrees via worktrunk"
 platforms = ["macos", "linux"]
@@ -19,6 +19,16 @@ id = "open-current"
 title = "Worktree: switch / create from current branch"
 contexts = ["workspace"]
 command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint picker-current --placement split --direction down --cwd \"$cwd\" --focus"]
+
+# Dispatch action: task-first spawn. Opens a centered composer overlay where you
+# describe the work; the branch name is derived from the text, the worktree is
+# created via wt (hooks run), and a coding agent starts in it with the task as
+# its opening prompt.
+[[actions]]
+id = "dispatch"
+title = "Sow: worktree + agent from a task prompt"
+contexts = ["workspace"]
+command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint composer --placement overlay --cwd \"$cwd\" --focus"]
 
 # Remove actions: direct current-worktree removal for the common case, plus the
 # picker for cleanup elsewhere.
@@ -47,6 +57,12 @@ id = "picker-current"
 title = "Worktrunk — current branch"
 placement = "split"
 command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/picker.sh\" --create-base=current"]
+
+[[panes]]
+id = "composer"
+title = "Sow — dispatch a task"
+placement = "overlay"
+command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/composer.sh\""]
 
 [[panes]]
 id = "remover"

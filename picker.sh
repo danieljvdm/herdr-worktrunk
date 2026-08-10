@@ -41,7 +41,9 @@ branch_refs=(refs/heads refs/remotes)
 [[ $(worktrunk_show_remote_branches) == false ]] && branch_refs=(refs/heads)
 
 # fzf over existing worktree branches; --print-query returns a typed-but-unmatched
-# name so we can create it. Falls back to a plain read if fzf isn't on PATH.
+# name so we can create it, and --expect=ctrl-o promotes the choice into the
+# task composer (worktree + agent + opening prompt via dispatch.sh). Falls back
+# to a plain read if fzf isn't on PATH.
 if command -v fzf >/dev/null; then
   choice=$(
     {
@@ -53,13 +55,23 @@ if command -v fzf >/dev/null; then
       git for-each-ref --format='%(refname) %(refname:short)' "${branch_refs[@]}" 2>/dev/null \
         | awk '$1 !~ /\/HEAD$/ {print $2}'
     } | LC_ALL=C sort -u \
-      | fzf --print-query --reverse --info=inline --border=rounded --margin=20%,30% \
+      | fzf --print-query --expect=ctrl-o --reverse --info=inline --border=rounded --margin=20%,30% \
             --prompt='worktree ❯ ' \
-            --header="↵ on a match → switch · type a new name + ↵ → create from ${create_base_label} · esc → cancel"
+            --header="↵ on a match → switch · type a new name + ↵ → create from ${create_base_label} · ctrl-o → +agent prompt · esc → cancel"
   )
   ret=$?
   [[ $ret -gt 1 ]] && exit 0      # 130 = esc/abort → cancel (0 = picked, 1 = typed-new)
-  name=${choice##*$'\n'}          # last line: the selection if any, else the typed query
+  # --print-query + --expect: line 1 = typed query, line 2 = accepting key,
+  # line 3 = the selection (absent when the query matched nothing).
+  query=$(sed -n 1p <<<"$choice")
+  pressed=$(sed -n 2p <<<"$choice")
+  name=$(sed -n 3p <<<"$choice")
+  [[ -z $name ]] && name=$query
+  if [[ $pressed == ctrl-o ]]; then
+    export WORKTRUNK_COMPOSER_BRANCH=$name
+    [[ -n $create_base ]] && export WORKTRUNK_COMPOSER_BASE=$create_base
+    exec bash "$plugin_root/composer.sh"
+  fi
 else
   printf 'Branch (existing → switch · new → create from %s): ' "$create_base_label"
   read -r name

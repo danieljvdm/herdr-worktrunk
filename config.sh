@@ -60,3 +60,17 @@ worktrunk_open_mode() {
       ;;
   esac
 }
+
+# Print the agent kind dispatch.sh starts when none is chosen explicitly.
+# Set default_agent = "codex" (any `herdr agent start` kind) to change it.
+worktrunk_default_agent() {
+  local value
+
+  value=$(worktrunk_config_value default_agent)
+
+  if [[ -n $value ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '%s\n' claude
+  fi
+}

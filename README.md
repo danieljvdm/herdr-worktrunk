@@ -38,6 +38,28 @@ Both create actions support [worktrunk syntax for PR/MR along with other shortcu
 Worktrunk's lifecycle hooks run in either presentation mode, and the checkout
 opens as a tab or a native worktree workspace according to plugin configuration.
 
+- **Sow: worktree + agent from a task prompt** — task-first dispatch. A
+  centered overlay asks you to describe the work; the branch name is derived
+  live from your text (shown in the header as you type), the worktree is
+  created through `wt` (hooks run), it opens as a native worktree workspace,
+  and a coding agent starts in its root pane with your task as the opening
+  prompt. Inline grammar: start with `@claude` / `@codex` (any `herdr agent
+  start` kind) to pick the agent, or `some-branch-name:` to pick the branch.
+  Set `default_agent = "codex"` in the plugin config to change the default
+  (claude). Inside the switch/create pickers, `ctrl-o` promotes the highlighted
+  or typed branch into the same composer.
+
+  The engine behind the overlay is `dispatch.sh`, which is also a standalone
+  CLI — alias it (e.g. `sow`) to dispatch from any shell or coding agent:
+
+  ```bash
+  sow "fix the flaky token refresh in auth"        # branch + agent, one shot
+  sow --codex "bump node to 22"                    # pick the agent
+  sow -b fix-auth --no-focus - <<'EOF'             # scripted, prompt on stdin
+  Fix the flaky token refresh...
+  EOF
+  ```
+
 - **Worktree: remove current** — removes the worktree containing the focused
   workspace without opening a picker. Worktrunk still applies its dirty/unmerged
   safeguards; on success, the associated Herdr workspace closes.
@@ -160,6 +182,13 @@ key = "prefix+shift+c"
 type = "plugin_action"
 command = "worktrunk.open-current"
 description = "Worktree: switch / create from current branch"
+
+# Task-first dispatch: describe the work, get a worktree + agent + prompt.
+[[keys.command]]
+key = "prefix+shift+a"
+type = "plugin_action"
+command = "worktrunk.dispatch"
+description = "Sow: worktree + agent from a task prompt"
 
 [[keys.command]]
 key = "prefix+shift+d"

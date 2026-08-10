@@ -46,8 +46,7 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   grammar: start with `@claude` / `@codex` (any `herdr agent start` kind) to
   pick the agent, `some-branch-name:` to pick the branch yourself, or
   `>repo` (a path, or the name of any repo with a pane open) to target
-  another repository — typing `>` in the composer lists matching open repos
-  inline, and tab completes the highlighted one. Set `default_agent = "codex"` in the plugin config to
+  another repository. Set `default_agent = "codex"` in the plugin config to
   change the default agent (claude). Inside the switch/create pickers,
   `ctrl-o` promotes the highlighted or typed branch into the same composer.
 

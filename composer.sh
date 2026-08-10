@@ -59,6 +59,13 @@ else
   hint_line="@agent / name: on the first line override · esc cancels"
 fi
 
+# Advertise clipboard images: `!img` in the task becomes the saved image's
+# path, which claude and codex read natively. Probe cheaply at open so the
+# hint only appears when there is actually an image to attach.
+if command -v pngpaste >/dev/null && pngpaste - >/dev/null 2>&1; then
+  hint_line="📋 clipboard image — !img attaches it · $hint_line"
+fi
+
 if command -v gum >/dev/null; then
   task=$(
     gum write --width 74 --height 10 --char-limit 0 --show-help \
@@ -83,6 +90,18 @@ else
 fi
 
 [[ -z ${task//[[:space:]]/} ]] && exit 0
+
+# `!img` → the clipboard image, saved to a stable file whose path replaces
+# the token. Every occurrence gets the same image (there is one clipboard);
+# the file outlives the popup so the sown agent can read it.
+if [[ $task == *'!img'* ]]; then
+  img_path="${TMPDIR:-/tmp}/sow-image-$(date +%s)-$$.png"
+  if worktrunk_clipboard_image "$img_path"; then
+    task=${task//'!img'/"[attached image — read $img_path]"}
+  else
+    fail "the task references !img but the clipboard has no image"
+  fi
+fi
 
 # Grammar is resolved here (dispatch's stdin mode takes the task verbatim);
 # explicit flags below carry the parsed pieces to the runner.

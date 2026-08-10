@@ -51,6 +51,11 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   change the default agent (claude). Inside the switch/create pickers,
   `ctrl-o` promotes the highlighted or typed branch into the same composer.
 
+  Images: type `!img` anywhere in the task to attach the clipboard image —
+  it is saved to a file and the token becomes its path, which coding agents
+  read natively. Needs `pngpaste` (macOS), `wl-paste`, or `xclip`; the
+  composer's hint line notes when the clipboard holds an image.
+
   The action carries both `workspace` and `global` contexts. From a focused
   workspace, that workspace's repo is the target. Invoked with no workspace
   context, the composer resolves the target from the task text — an explicit

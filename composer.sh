@@ -45,43 +45,19 @@ fail() {
   exit 1
 }
 
-# fzf over open repos, focused repo on top so bare Enter passes through.
-# Prints the chosen path; returns nonzero on esc/no repos.
-composer_pick_repo() {
-  local repos focused focused_root choice
-  repos=$(worktrunk_open_repos)
-  [[ -z $repos ]] && return 1
-  focused=$("$herdr" pane current 2>/dev/null \
-    | jq -r '[.. | objects | .cwd? // empty] | first // empty')
-  focused_root=''
-  if [[ -n $focused ]]; then
-    focused_root=$(git -C "$focused" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-    focused_root=${focused_root%/.git}
-  fi
-  choice=$(
-    {
-      [[ -n $focused_root ]] && printf '%s\n' "$repos" | awk -F'\t' -v f="$focused_root" '$1 == f'
-      printf '%s\n' "$repos" | awk -F'\t' -v f="$focused_root" '$1 != f'
-    } | fzf --with-nth=2 --delimiter=$'\t' --reverse --no-info \
-          --border=rounded --margin=0,1 --prompt='repo ❯ ' \
-          --header='where does this task go? · ↵ pick · esc cancel'
-  ) || return 1
-  printf '%s\n' "${choice%%$'\t'*}"
-}
-
-# Target repo first: the caller's workspace repo, or a picker when invoked
-# globally. The textarea header then names the settled target.
+# Task first, from anywhere: the textarea opens immediately and the target
+# repo settles after submit — the caller's workspace repo, or (globally) a
+# >token / repo name mentioned in the task, with the picker as the last net.
 if [[ -n $global_mode ]]; then
-  repo_path=$(composer_pick_repo) || exit 0
+  header_line="global sow · agent: $default_agent"
+  hint_line="repo: name it in the task or >repo (picker if unclear) · @agent / name: override · esc cancels"
 else
-  repo_path=$PWD
+  repo_name=$(git rev-parse --show-toplevel 2>/dev/null)
+  repo_name=${repo_name##*/}
+  header_line="→ ${repo_name:-$PWD} · agent: $default_agent"
+  [[ -n $branch_hint ]] && header_line+=" · branch: $branch_hint"
+  hint_line="@agent / name: on the first line override · esc cancels"
 fi
-repo_name=$(git -C "$repo_path" rev-parse --show-toplevel 2>/dev/null)
-repo_name=${repo_name##*/}
-
-header_line="→ ${repo_name:-$repo_path} · agent: $default_agent"
-[[ -n $branch_hint ]] && header_line+=" · branch: $branch_hint"
-hint_line="@agent / name: on the first line override · esc cancels"
 
 if command -v gum >/dev/null; then
   task=$(
@@ -109,10 +85,12 @@ fi
 [[ -z ${task//[[:space:]]/} ]] && exit 0
 
 # Grammar is resolved here (dispatch's stdin mode takes the task verbatim);
-# explicit flags below carry the parsed pieces to the runner. A >token still
-# overrides the settled target for power use, with a seeded picker when it
-# does not uniquely resolve.
+# explicit flags below carry the parsed pieces to the runner.
 parse_grammar "$task"
+
+# Target repo ladder: >token > workspace repo > (global) repo name mentioned
+# in the task > interactive picker — all while the popup owns the terminal.
+repo_path=''
 if [[ -n $grammar_repo ]]; then
   if ! repo_path=$(resolve_repo_token "$grammar_repo"); then
     repo_path=$(worktrunk_open_repos \
@@ -122,6 +100,13 @@ if [[ -n $grammar_repo ]]; then
       || exit 0
     repo_path=${repo_path%%$'\t'*}
   fi
+elif [[ -z $global_mode ]]; then
+  repo_path=$PWD
+else
+  repo_path=$(pick_repo_for_task "$task")
+  pick_rc=$?
+  [[ $pick_rc -eq 130 ]] && exit 0
+  [[ $pick_rc -ne 0 || -z $repo_path ]] && fail "could not resolve a target repository"
 fi
 
 root_ws=$(worktrunk_root_workspace "$repo_path") \
@@ -133,7 +118,14 @@ root_ws=$(worktrunk_root_workspace "$repo_path") \
 task_tmp=$(mktemp "${TMPDIR:-/tmp}/sow-task.XXXXXX")
 printf '%s' "$task" > "$task_tmp"
 
-runner="bash $(printf '%q' "$plugin_root/dispatch.sh")"
+# The runner is a plain tab, not a plugin pane, so herdr does not inject
+# HERDR_PLUGIN_CONFIG_DIR there — without it dispatch silently loses the
+# plugin config (dispatch_focus, branch_name_command, default_agent) and
+# reverts to focus-stealing defaults.
+runner=''
+[[ -n ${HERDR_PLUGIN_CONFIG_DIR:-} ]] \
+  && runner="HERDR_PLUGIN_CONFIG_DIR=$(printf '%q' "$HERDR_PLUGIN_CONFIG_DIR") "
+runner+="bash $(printf '%q' "$plugin_root/dispatch.sh")"
 [[ -n $grammar_agent ]] && runner+=" --agent $(printf '%q' "$grammar_agent")"
 if [[ -n $grammar_branch ]]; then
   runner+=" -b $(printf '%q' "$grammar_branch")"

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# sow — task-first worktree + agent dispatch, from anywhere in a herdr session.
+#
+#   sow "fix the flaky token refresh in auth"     # branch derived, agent fired
+#   sow --codex "bump node to 22"                 # pick the agent
+#   sow -b fix-auth --no-focus - <<'EOF'          # scripted: prompt on stdin
+#   ...
+#   EOF
+#
+# Thin wrapper over dispatch.sh from the worktrunk herdr plugin
+# (github.com/danieljvdm/herdr-worktrunk) — the same engine behind the
+# prefix+shift+a composer. Run `sow --help` for the full option list.
+set -euo pipefail
+
+plugin_root=$(herdr plugin list --plugin worktrunk --json 2>/dev/null \
+  | jq -r '[.. | objects | .plugin_root? // empty] | first // empty')
+if [[ -z $plugin_root || ! -f $plugin_root/dispatch.sh ]]; then
+  echo "sow: worktrunk herdr plugin not installed (herdr plugin install danieljvdm/herdr-worktrunk)" >&2
+  exit 1
+fi
+
+export HERDR_PLUGIN_ROOT=$plugin_root
+HERDR_PLUGIN_CONFIG_DIR=$(herdr plugin config-dir worktrunk 2>/dev/null) || true
+[[ -n ${HERDR_PLUGIN_CONFIG_DIR:-} ]] && export HERDR_PLUGIN_CONFIG_DIR
+
+exec bash "$plugin_root/dispatch.sh" "$@"

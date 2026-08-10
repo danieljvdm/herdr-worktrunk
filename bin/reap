@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# reap — remove the worktree you are standing in, plus its herdr workspace.
+# The counterpart to sow: same engine as the prefix+shift+d keybinding
+# (worktrunk plugin remove.sh --current). Worktrunk still gates dirty and
+# unmerged work and runs teardown hooks.
+#
+# NOTE: closing the workspace kills every pane in it — including the caller.
+# An agent reaping its own session should treat this as its final act: say
+# goodbye first, then run `reap` as the last command. Nothing after it runs.
+set -euo pipefail
+
+plugin_root=$(herdr plugin list --plugin worktrunk --json 2>/dev/null \
+  | jq -r '[.. | objects | .plugin_root? // empty] | first // empty')
+if [[ -z $plugin_root || ! -f $plugin_root/remove.sh ]]; then
+  echo "reap: worktrunk herdr plugin not installed (herdr plugin install danieljvdm/herdr-worktrunk)" >&2
+  exit 1
+fi
+
+export HERDR_PLUGIN_ROOT=$plugin_root
+exec bash "$plugin_root/remove.sh" --current

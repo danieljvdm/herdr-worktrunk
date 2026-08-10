@@ -141,15 +141,37 @@ Platforms: macOS and Linux.
 From the herdr CLI:
 
 ```bash
-herdr plugin install devashish2203/herdr-worktrunk
+herdr plugin install danieljvdm/herdr-worktrunk
 ```
 
 Or, for local development, clone and link:
 
 ```bash
-git clone https://github.com/devashish2203/herdr-worktrunk
+git clone https://github.com/danieljvdm/herdr-worktrunk
 herdr plugin link /path/to/herdr-worktrunk
 ```
+
+### CLI: `sow` and `reap`
+
+`bin/sow` and `bin/reap` are thin wrappers over the installed plugin (they
+resolve its root through `herdr plugin list`, so they survive plugin
+updates). Copy them anywhere on your `PATH`:
+
+```bash
+install -m 0755 bin/sow bin/reap ~/.local/bin/
+```
+
+`sow "task"` dispatches a worktree + agent from any shell inside a herdr
+session; `reap` removes the worktree you stand in and closes its workspace —
+the CLI forms of the composer and remove-current actions.
+
+### Agent skill
+
+`skills/sow/SKILL.md` teaches coding agents to dispatch tasks with `sow`
+(deriving a branch name from context and writing a self-contained handoff
+prompt) and to tear sessions down safely with `reap`. Copy the `sow`
+directory into your agent's skills directory (e.g. `~/.agents/skills/`) and
+adapt to taste.
 
 ## Usage
 

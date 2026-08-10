@@ -51,12 +51,16 @@ fi
 
 if command -v fzf >/dev/null; then
   candidates_bind="change:reload(sh $(printf '%q' "$plugin_root/repo-candidates.sh") {q} $(printf '%q' "$repos_tmp"))"
+  # Enter completes like tab while a bare >token has a highlighted candidate
+  # (a bare token is never a dispatchable task); otherwise it accepts.
+  enter_bind='enter:transform:q={q}; sel={}; case "$q" in ">"*" "*) echo accept ;; ">"*) if [ -n "$sel" ]; then echo replace-query; else echo accept; fi ;; *) echo accept ;; esac'
   task=$(
     : | fzf --disabled --print-query --no-info --reverse \
         --border=rounded --margin=0,1 \
         --prompt='sow ❯ ' \
         --bind "$candidates_bind" \
         --bind 'tab:replace-query' \
+        --bind "$enter_bind" \
         --header="$header_line
 $hint_line"
   )

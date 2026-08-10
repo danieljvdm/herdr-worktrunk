@@ -248,7 +248,11 @@ fi
 [[ -z ${task// /} ]] && die "no task text given (see --help)"
 
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
-[[ -n ${HERDR_WORKSPACE_ID:-} ]] || die "sow only works inside a herdr session"
+# Reachability, not env: a global-context popup (and any plain terminal on
+# the same machine) has no HERDR_WORKSPACE_ID injected but can still talk to
+# the session over the socket.
+"$herdr" workspace list >/dev/null 2>&1 \
+  || die "no herdr session reachable (is herdr running?)"
 if [[ -n $repo_token ]]; then
   repo=$(resolve_repo_token "$repo_token") || die "no open repository matches '>$repo_token' — open repos: $(worktrunk_open_repos | cut -f2 | tr '\n' ' ')"
 fi
@@ -303,9 +307,9 @@ fi
 # workspace so the new worktree has a parent to register under.
 root_ws=$("$herdr" worktree list --cwd "$PWD" --json 2>/dev/null \
   | jq -r '.result.source.source_workspace_id // empty')
-if [[ -z $root_ws && -n $repo ]]; then
+if [[ -z $root_ws && ( -n $repo || -z ${HERDR_WORKSPACE_ID:-} ) ]]; then
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-  [[ -z $repo_root ]] && die "could not resolve the repository root of: $repo"
+  [[ -z $repo_root ]] && die "could not resolve the repository root of: ${repo:-$PWD}"
   printf '\033[2m» opening a root workspace for %s\033[0m\n' "$repo_root"
   root_ws=$("$herdr" workspace create --cwd "$repo_root" \
     --label "$(basename "$repo_root")" --no-focus \

@@ -155,20 +155,27 @@ metadata token (`$pr`) via `herdr workspace report-metadata`, using
 to report, though `refresh-pr` and `open-pr` (above) expose it as one too.
 
 To refresh automatically on every `wt switch`, add a personal
-[post-switch hook](https://worktrunk.dev/hook/) in `~/.config/worktrunk/config.toml`:
+[post-switch hook](https://worktrunk.dev/hook/) in `~/.config/worktrunk/config.toml`
+(`post-switch` already runs in the background, so this doesn't block the switch):
 
 ```toml
 [post-switch]
 pr-status = """
+cd "{{ worktree_path }}" || exit 0
 plugin_root=$(herdr plugin list --plugin worktrunk --json 2>/dev/null | jq -r '[.. | objects | .plugin_root? // empty] | first // empty')
-[ -n "$plugin_root" ] && bash "$plugin_root/pr-status.sh" report &
+[ -n "$plugin_root" ] && bash "$plugin_root/pr-status.sh" report
 """
 ```
 
-(The `herdr plugin list --json` lookup mirrors `bin/sow`/`bin/reap` — it
-survives plugin reinstalls, which change the on-disk path's hash suffix.
-Backgrounding with `&` keeps the hook from blocking `wt switch` on the `gh`
-call.)
+(The explicit `cd` doesn't rely on the hook's own working directory; the
+`herdr plugin list --json` lookup mirrors `bin/sow`/`bin/reap` — it survives
+plugin reinstalls, which change the on-disk path's hash suffix.)
+
+This covers switching branches from a terminal already inside a Herdr
+worktree workspace — the common case. It doesn't reach a worktree at the
+moment the picker/dispatch actions first create its workspace (the hook
+fires before Herdr registers that workspace), but a brand-new branch has no
+PR yet anyway; once one exists, `worktrunk.refresh-pr` picks it up.
 
 Then show the token in `[ui.sidebar.spaces]` in `~/.config/herdr/config.toml`:
 

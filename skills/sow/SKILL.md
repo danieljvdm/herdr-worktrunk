@@ -1,6 +1,6 @@
 ---
 name: sow
-description: Dispatch a task to a fresh git worktree with its own coding agent, in one shot, using the `sow` CLI inside a Herdr session — and tear such sessions down again with `reap`. Use when the user asks to spin up / hand off / sow a task into a new worktree or agent ("spin up a worktree for X", "hand this to codex in a new worktree"), to fan several tasks out at once, or to remove/reap a worktree session, including an agent deleting its own.
+description: Dispatch a task to a fresh git worktree with its own coding agent, in one shot, using the `sow` CLI inside a Herdr session — and tear such sessions down again with `reap`. Use when the user asks to spin up / hand off / sow a task into a new worktree or agent ("spin up a worktree for X", "hand this to codex in a new worktree"), including into a different repository or workspace than the current one (`--repo`), to fan several tasks out at once, or to remove/reap a worktree session, including an agent deleting its own.
 ---
 
 # Sow — dispatch a task to a new worktree + agent
@@ -9,9 +9,9 @@ description: Dispatch a task to a fresh git worktree with its own coding agent, 
 it as a Herdr worktree workspace, starts a coding agent in it, and submits the
 task as that agent's opening prompt. One command, fire and forget.
 
-Preconditions: `test "${HERDR_ENV:-}" = 1` and the current directory is inside
-the git repository the worktree should belong to. If either fails, say so and
-stop.
+Preconditions: `test "${HERDR_ENV:-}" = 1`; outside herdr, say so and stop.
+Run it from inside the target repository, or pass `--repo <path>` when the
+task belongs to a different one.
 
 ## Invocation
 
@@ -27,6 +27,11 @@ EOF
   work lands. Omit it only when the user asks to switch to the new workspace.
 - `--agent` (or `--claude`/`--codex`): use the kind the user named; default to
   the configured default (claude) otherwise.
+- `--repo PATH` dispatches into another repository: the worktree, workspace,
+  and agent all land there, and a root workspace opens in the background if
+  that repo has none. A task for another project is still a sow from right
+  here — dispatch it with `--repo`, rather than messaging an agent in that
+  repo's primary checkout and asking it to arrange its own worktree.
 - `--base REF` bases the new branch on REF; `--here` uses the current branch.
   Default is the repo's default branch.
 

@@ -17,6 +17,9 @@
 #       --claude       shorthand for --agent claude
 #       --codex        shorthand for --agent codex
 #   -b, --branch NAME  branch/worktree name (default: model-named from the task)
+#       --repo PATH    dispatch into this repository instead of the current
+#                      directory's; opens a root workspace for it if none is
+#                      open yet (alias: -C)
 #       --base REF     base ref for a newly created branch (worktrunk syntax)
 #       --here         shorthand for --base @ (current branch)
 #       --focus        switch to the new workspace when it opens
@@ -137,6 +140,7 @@ parse_grammar() {
 agent_kind=''
 branch=''
 base=''
+repo=''
 focus=$(worktrunk_dispatch_focus)
 task=''
 stdin_task=false
@@ -146,6 +150,7 @@ while [[ $# -gt 0 ]]; do
     -a|--agent) agent_kind=${2:?--agent needs a kind}; shift 2 ;;
     --claude|--codex) agent_kind=${1#--}; shift ;;
     -b|--branch) branch=${2:?--branch needs a name}; shift 2 ;;
+    --repo|-C) repo=${2:?--repo needs a path}; shift 2 ;;
     --base) base=${2:?--base needs a ref}; shift 2 ;;
     --here) base='@'; shift ;;
     --focus) focus=true; shift ;;
@@ -158,7 +163,7 @@ while [[ $# -gt 0 ]]; do
       preview_agent=${grammar_agent:-$(worktrunk_default_agent)}
       printf 'branch: %s · agent: %s\n' "${preview_branch:-—}" "$preview_agent"
       exit 0 ;;
-    -h|--help) sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -) stdin_task=true; shift ;;
     --) shift; task="$*"; break ;;
     -*) die "unknown option: $1" ;;
@@ -177,6 +182,9 @@ fi
 
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
 [[ -n ${HERDR_WORKSPACE_ID:-} ]] || die "sow only works inside a herdr session"
+if [[ -n $repo ]]; then
+  cd "$repo" 2>/dev/null || die "no such directory: $repo"
+fi
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository: $PWD"
 
 # Branch: explicit > hint > named by a model from the task (slug of the task
@@ -214,9 +222,20 @@ else
 fi
 
 # Register new worktrees under the repo's root workspace, not a sibling
-# worktree workspace. (Matches picker.sh.)
+# worktree workspace. (Matches picker.sh.) With --repo, the target repo may
+# have no workspace open at all yet — open its root as a background
+# workspace so the new worktree has a parent to register under.
 root_ws=$("$herdr" worktree list --cwd "$PWD" --json 2>/dev/null \
   | jq -r '.result.source.source_workspace_id // empty')
+if [[ -z $root_ws && -n $repo ]]; then
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+  [[ -z $repo_root ]] && die "could not resolve the repository root of: $repo"
+  printf '\033[2m» opening a root workspace for %s\033[0m\n' "$repo_root"
+  root_ws=$("$herdr" workspace create --cwd "$repo_root" \
+    --label "$(basename "$repo_root")" --no-focus \
+    | jq -r '.result.workspace.workspace_id // empty')
+  [[ -z $root_ws ]] && die "failed to open a workspace for $repo_root"
+fi
 [[ -z $root_ws ]] && root_ws=$HERDR_WORKSPACE_ID
 
 printf '\033[2m» wt %s\033[0m\n' "${wtargs[*]}"

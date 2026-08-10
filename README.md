@@ -68,10 +68,15 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   ```bash
   sow "fix the flaky token refresh in auth"        # branch + agent, one shot
   sow --codex "bump node to 22"                    # pick the agent
+  sow --repo ~/dev/other-repo "fix the CI flake"   # dispatch into another repo
   sow -b fix-auth --no-focus - <<'EOF'             # scripted, prompt on stdin
   Fix the flaky token refresh...
   EOF
   ```
+
+  `--repo` dispatches into a repository other than the current directory's;
+  if that repo has no herdr workspace open yet, its root opens as a
+  background workspace so the worktree has a parent to register under.
 
 - **Worktree: remove current** — removes the worktree containing the focused
   workspace without opening a picker. Worktrunk still applies its dirty/unmerged

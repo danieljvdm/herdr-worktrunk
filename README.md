@@ -97,6 +97,13 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   any legacy tab panes associated with the deleted worktree are closed
   automatically.
 
+- **Worktree: refresh PR status** / **Worktree: open PR in browser** — the
+  focused workspace's checkout is queried with `gh pr view`; refresh reports
+  the result (`#123`, `#123 draft`, `#123 merged`, `#123 closed`, or nothing)
+  as a `$pr` workspace metadata token, and open runs `gh pr view --web`. See
+  [PR status](#pr-status) to wire refresh into `wt switch` and show `$pr` in
+  the sidebar.
+
 ## Worktree presentation
 
 By default the plugin organizes worktrees the same way as herdr's built-in
@@ -140,10 +147,46 @@ show_remote_branches = true
 
 Local branches without worktrees always appear regardless of this setting.
 
+## PR status
+
+`pr-status.sh` reports the current worktree's GitHub PR as a Herdr workspace
+metadata token (`$pr`) via `herdr workspace report-metadata`, using
+`$HERDR_WORKSPACE_ID` from the pane environment — no plugin action required
+to report, though `refresh-pr` and `open-pr` (above) expose it as one too.
+
+To refresh automatically on every `wt switch`, add a personal
+[post-switch hook](https://worktrunk.dev/hook/) in `~/.config/worktrunk/config.toml`:
+
+```toml
+[post-switch]
+pr-status = """
+plugin_root=$(herdr plugin list --plugin worktrunk --json 2>/dev/null | jq -r '[.. | objects | .plugin_root? // empty] | first // empty')
+[ -n "$plugin_root" ] && bash "$plugin_root/pr-status.sh" report &
+"""
+```
+
+(The `herdr plugin list --json` lookup mirrors `bin/sow`/`bin/reap` — it
+survives plugin reinstalls, which change the on-disk path's hash suffix.
+Backgrounding with `&` keeps the hook from blocking `wt switch` on the `gh`
+call.)
+
+Then show the token in `[ui.sidebar.spaces]` in `~/.config/herdr/config.toml`:
+
+```toml
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"], ["branch", "git_status", "$pr"]]
+```
+
+No open PR clears the token, so `$pr` renders as nothing rather than a stale
+value. It only updates on switch — if a PR merges while you're still sitting
+in the worktree, run `worktrunk.refresh-pr` (e.g. bind a key, see
+[Keybindings](#keybindings)) to re-check it.
+
 ## Requirements
 
 - [**herdr**](https://herdr.dev) ≥ 0.7.0
 - [**worktrunk**](https://github.com/max-sixty/worktrunk) ≥ 0.60.0 — the `wt` CLI on your `PATH`
+- [**gh**](https://cli.github.com/) — GitHub CLI, for PR status (optional; other actions work without it)
 - **fzf** — the interactive picker
 - **jq** — JSON parsing
 - **bash** — the scripts run with `/bin/bash`
@@ -209,6 +252,16 @@ herdr plugin action invoke remove-current --plugin worktrunk
 herdr plugin action invoke remove --plugin worktrunk
 ```
 
+### Refresh PR Status
+```
+herdr plugin action invoke refresh-pr --plugin worktrunk
+```
+
+### Open PR in Browser
+```
+herdr plugin action invoke open-pr --plugin worktrunk
+```
+
 ## Keybindings
 
 To drive the plugin from the keyboard, add `[[keys.command]]` entries to
@@ -244,6 +297,21 @@ key = "prefix+shift+d"
 type = "plugin_action"
 command = "worktrunk.remove-current"
 description = "Worktree: remove current"
+
+# PR status: re-check on demand, and jump straight to the PR in a browser.
+# (prefix+shift+p is herdr's built-in rename_pane — pick another key if you
+# use that.)
+[[keys.command]]
+key = "prefix+shift+r"
+type = "plugin_action"
+command = "worktrunk.refresh-pr"
+description = "Worktree: refresh PR status"
+
+[[keys.command]]
+key = "prefix+shift+o"
+type = "plugin_action"
+command = "worktrunk.open-pr"
+description = "Worktree: open PR in browser"
 ```
 
 The remove-any picker remains available through the action list as
@@ -271,8 +339,10 @@ The plugin is a manifest plus small bash scripts:
 - `helpers.sh` — shared shell helpers (e.g. worktrunk shortcut detection)
 - `picker.sh` — the switch / create picker
 - `remove.sh` — the remove picker + orphaned-pane cleanup
+- `pr-status.sh` — PR status: report as workspace metadata, or open in a browser
 - `tests/config_test.sh` — configuration parser checks
 - `tests/helpers_test.sh` — helper function checks
+- `tests/pr_status_test.sh` — PR label formatting checks
 
 herdr caches the manifest when a plugin is linked, so after editing
 `herdr-plugin.toml` you must relink for changes to take effect:

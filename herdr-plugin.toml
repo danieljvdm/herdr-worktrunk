@@ -1,6 +1,6 @@
 id = "worktrunk"
 name = "Worktrunk"
-version = "0.3.0"
+version = "0.4.0"
 min_herdr_version = "0.7.0"
 description = "Switch, create, or remove git worktrees via worktrunk"
 platforms = ["macos", "linux"]
@@ -45,6 +45,22 @@ id = "remove"
 title = "Worktree: remove any"
 contexts = ["workspace"]
 command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint remover --placement split --direction down --cwd \"$cwd\" --focus"]
+
+# PR status: report the current worktree's GitHub PR (if any) as workspace
+# metadata (a `$pr` token for [ui.sidebar.spaces]), and open it in a browser.
+# refresh-pr runs on-demand; the worktrunk post-switch hook runs report
+# automatically on every switch (see pr-status.sh's header comment).
+[[actions]]
+id = "refresh-pr"
+title = "Worktree: refresh PR status"
+contexts = ["workspace"]
+command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/pr-status.sh\" report"]
+
+[[actions]]
+id = "open-pr"
+title = "Worktree: open PR in browser"
+contexts = ["workspace"]
+command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/pr-status.sh\" open"]
 
 # Plugin panes run as plain bash. Depending on plugin config, picker.sh opens
 # the checkout in a tab or registers it as a native herdr worktree workspace.

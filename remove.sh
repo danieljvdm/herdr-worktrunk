@@ -73,9 +73,16 @@ wsid=$("$herdr" worktree list --cwd "$PWD" --json 2>/dev/null \
 # require shell integration to cd the plain Bash plugin process elsewhere.
 # Worktrunk still runs hooks in the target worktree and gates dirty/unmerged
 # deletion. --foreground keeps the pane until removal is complete.
+# Fail with a real exit code for scripted callers (agents reaping their own
+# session via `remove.sh --current`); only block for a keypress on a TTY.
 if ! wt -C "$repo_path" remove --foreground "$target"; then
-  printf '\n\033[31m%s\033[0m press any key to close' "wt remove failed (see above)."; read -n1
-  exit 0
+  printf '\n\033[31m%s\033[0m' "wt remove failed (see above)."
+  if [[ -t 0 ]]; then
+    printf ' press any key to close'
+    read -n1
+  fi
+  printf '\n'
+  exit 1
 fi
 cd "$repo_path" 2>/dev/null || true
 

@@ -18,16 +18,19 @@ set -uo pipefail
 plugin_root=${HERDR_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}
 # shellcheck source=./config.sh
 source "$plugin_root/config.sh"
+# shellcheck source=./helpers.sh
+source "$plugin_root/helpers.sh"
 
 branch_hint=${WORKTRUNK_COMPOSER_BRANCH:-}
 base_hint=${WORKTRUNK_COMPOSER_BASE:-}
 global_mode=${WORKTRUNK_COMPOSER_GLOBAL:-}
 default_agent=$(worktrunk_default_agent)
 
-hint_line="@claude / @codex picks the agent · name: picks the branch · esc cancels"
+hint_line="@agent · name: picks branch · >repo (ctrl-r picks) · esc cancels"
 if [[ -n $global_mode ]]; then
-  hint_line=">repo or a repo named in the task picks the target · $hint_line"
   header_line="global sow · agent: $default_agent"
+  repo_names=$(worktrunk_open_repos | cut -f2 | tr '\n' ' ')
+  [[ -n $repo_names ]] && hint_line+=$'\n'"open: ${repo_names:0:70}"
 elif [[ -n $branch_hint ]]; then
   header_line="branch: $branch_hint · agent: $default_agent"
 else
@@ -35,10 +38,16 @@ else
 fi
 
 if command -v fzf >/dev/null; then
+  # ctrl-r: repo autocomplete. execute() gets the terminal for an inner fzf,
+  # writes the rewritten query to a temp file, and transform-query applies it.
+  complete_tmp=$(mktemp "${TMPDIR:-/tmp}/sow-complete.XXXXXX")
+  trap 'rm -f "$complete_tmp"' EXIT
+  complete_bind="ctrl-r:execute(bash $(printf '%q' "$plugin_root/repo-complete.sh") {q} > $(printf '%q' "$complete_tmp"))+transform-query(cat $(printf '%q' "$complete_tmp"))"
   task=$(
     : | fzf --disabled --print-query --no-info --reverse \
         --border=rounded --margin=0,1 \
         --prompt='sow ❯ ' \
+        --bind "$complete_bind" \
         --header="$header_line
 $hint_line"
   )

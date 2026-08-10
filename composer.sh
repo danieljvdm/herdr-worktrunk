@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Task composer for the worktrunk herdr plugin. Collects the task in a compact
-# popup — a multiline gum textarea when gum is installed, a single-line fzf
-# with inline >repo completion otherwise — then hands dispatch to a background
-# "sow" tab in the target repo's root workspace and exits, so the popup never
-# blocks on worktree hooks or branch naming. (The runner must be a herdr pane
-# of its own: a pane's children die with it, so a nohup'd child would not
+# popup: a single-line fzf with inline >repo typeahead first, and ctrl+e
+# expands into a multiline gum textarea seeded with the typed text (enter
+# submits in both stages). Dispatch then runs in a background "sow" tab of
+# the target repo's root workspace and the popup exits, so it never blocks
+# on worktree hooks or branch naming. (The runner must be a herdr pane of
+# its own: a pane's children die with it, so a nohup'd child would not
 # survive this popup closing.)
 #
 # Inline grammar (parsed here via helpers, resolved before detaching):
@@ -59,20 +60,17 @@ if [[ -n $global_mode ]]; then
   [[ -n $repo_names ]] && hint_line+=$'\n'"open: ${repo_names:0:70}"
 fi
 
-if command -v gum >/dev/null; then
-  task=$(
-    gum write --width 74 --height 9 --char-limit 0 --show-help \
-      --header "$header_line
-$hint_line" \
-      --placeholder 'describe the task… (ctrl+d dispatches)'
-  ) || exit 0
-elif command -v fzf >/dev/null; then
+have_gum=false
+command -v gum >/dev/null && have_gum=true
+
+if command -v fzf >/dev/null; then
+  [[ $have_gum == true ]] && hint_line+=" · ctrl+e multiline"
   candidates_bind="change:reload(sh $(printf '%q' "$plugin_root/repo-candidates.sh") {q} $(printf '%q' "$repos_tmp"))"
   # Enter completes like tab while a bare >token has a highlighted candidate
   # (a bare token is never a dispatchable task); otherwise it accepts.
   enter_bind='enter:transform:q={q}; sel={}; case "$q" in ">"*" "*) echo accept ;; ">"*) if [ -n "$sel" ]; then echo replace-query; else echo accept; fi ;; *) echo accept ;; esac'
-  task=$(
-    : | fzf --disabled --print-query --no-info --reverse \
+  out=$(
+    : | fzf --disabled --print-query --expect=ctrl-e --no-info --reverse \
         --border=rounded --margin=0,1 \
         --prompt='sow ❯ ' \
         --bind "$candidates_bind" \
@@ -83,7 +81,25 @@ $hint_line"
   )
   ret=$?
   [[ $ret -gt 1 ]] && exit 0   # esc/abort → cancel (1 = accepted with no match list, expected)
-  task=$(printf '%s\n' "$task" | sed -n 1p)   # --print-query: line 1 is the typed text
+  # --print-query + --expect: line 1 = typed text, line 2 = accepting key.
+  task=$(printf '%s\n' "$out" | sed -n 1p)
+  pressed=$(printf '%s\n' "$out" | sed -n 2p)
+  if [[ $pressed == ctrl-e && $have_gum == true ]]; then
+    task=$(
+      gum write --width 74 --height 9 --char-limit 0 --show-help \
+        --value "$task" \
+        --header "$header_line
+$hint_line" \
+        --placeholder 'describe the task…'
+    ) || exit 0
+  fi
+elif [[ $have_gum == true ]]; then
+  task=$(
+    gum write --width 74 --height 9 --char-limit 0 --show-help \
+      --header "$header_line
+$hint_line" \
+      --placeholder 'describe the task…'
+  ) || exit 0
 else
   printf '%s\n%s\n' "$header_line" "$hint_line"
   read -er -p 'sow ❯ ' task
@@ -99,8 +115,15 @@ parse_grammar "$task"
 # or interactive picker while the popup still owns the terminal.
 repo_path=''
 if [[ -n $grammar_repo ]]; then
-  repo_path=$(resolve_repo_token "$grammar_repo") \
-    || fail "no open repository matches '>$grammar_repo'"
+  if ! repo_path=$(resolve_repo_token "$grammar_repo"); then
+    # Ambiguous or unknown token → picker seeded with it rather than an error.
+    repo_path=$(worktrunk_open_repos \
+      | fzf --with-nth=2 --delimiter=$'\t' --query "$grammar_repo" \
+            --reverse --no-info --border=rounded --prompt='repo ❯ ' \
+            --header="'>$grammar_repo' is ambiguous · ↵ pick · esc cancel") \
+      || exit 0
+    repo_path=${repo_path%%$'\t'*}
+  fi
 elif [[ -z $global_mode ]]; then
   repo_path=$PWD
 else

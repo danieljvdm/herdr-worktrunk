@@ -299,10 +299,10 @@ command = "worktrunk.remove-current"
 description = "Worktree: remove current"
 
 # PR status: re-check on demand, and jump straight to the PR in a browser.
-# (prefix+shift+p is herdr's built-in rename_pane — pick another key if you
-# use that.)
+# (prefix+shift+r and prefix+shift+p are herdr's built-in reload_config and
+# rename_pane — pick other keys if you use those.)
 [[keys.command]]
-key = "prefix+shift+r"
+key = "prefix+shift+u"
 type = "plugin_action"
 command = "worktrunk.refresh-pr"
 description = "Worktree: refresh PR status"

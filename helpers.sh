@@ -76,3 +76,18 @@ worktrunk_started_worktree_path() {
          | if length == 1 then .[0].path else empty end)
       '
 }
+
+# Print "path<TAB>name" for each distinct git repository with a pane open in
+# the current herdr session. Linked-worktree panes resolve to their repo's
+# primary checkout via the git common dir, so each repo appears once.
+worktrunk_open_repos() {
+  local herdr=${HERDR_BIN_PATH:-herdr} cwd root
+  "$herdr" pane list 2>/dev/null \
+    | jq -r '[.. | objects | select(has("pane_id")) | .cwd // empty] | unique | .[]' \
+    | while IFS= read -r cwd; do
+        root=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || continue
+        root=${root%/.git}
+        [[ -n $root ]] || continue
+        printf '%s\t%s\n' "$root" "${root##*/}"
+      done | LC_ALL=C sort -u
+}

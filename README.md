@@ -39,15 +39,23 @@ Worktrunk's lifecycle hooks run in either presentation mode, and the checkout
 opens as a tab or a native worktree workspace according to plugin configuration.
 
 - **Sow: worktree + agent from a task prompt** — task-first dispatch. A
-  centered overlay asks you to describe the work; a fast model call names the
-  branch from your text, the worktree is created through `wt` (hooks run), it
-  opens as a native worktree workspace, and a coding agent starts in its root
-  pane with your task as the opening prompt. Inline grammar: start with
-  `@claude` / `@codex` (any `herdr agent start` kind) to pick the agent, or
-  `some-branch-name:` to pick the branch yourself. Set `default_agent =
-  "codex"` in the plugin config to change the default agent (claude). Inside
-  the switch/create pickers, `ctrl-o` promotes the highlighted or typed branch
-  into the same composer.
+  compact centered popup asks you to describe the work; a fast model call
+  names the branch from your text, the worktree is created through `wt`
+  (hooks run), it opens as a native worktree workspace, and a coding agent
+  starts in its root pane with your task as the opening prompt. Inline
+  grammar: start with `@claude` / `@codex` (any `herdr agent start` kind) to
+  pick the agent, `some-branch-name:` to pick the branch yourself, or
+  `>repo` (a path, or the name of any repo with a pane open) to target
+  another repository. Set `default_agent = "codex"` in the plugin config to
+  change the default agent (claude). Inside the switch/create pickers,
+  `ctrl-o` promotes the highlighted or typed branch into the same composer.
+
+  The action carries both `workspace` and `global` contexts. From a focused
+  workspace, that workspace's repo is the target. Invoked with no workspace
+  context, the composer resolves the target from the task text — an explicit
+  `>repo` token first, then a repo name mentioned anywhere in the text
+  (matched against repos with panes open) — and falls back to an fzf picker
+  over open repos, the focused repo listed first.
 
   Branch naming: set `branch_name_command` in the plugin config to any shell
   command that reads the task text on stdin and prints a branch name on

@@ -1,6 +1,6 @@
 id = "worktrunk"
 name = "Worktrunk"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.7.0"
 description = "Switch, create, or remove git worktrees via worktrunk"
 platforms = ["macos", "linux"]
@@ -20,15 +20,17 @@ title = "Worktree: switch / create from current branch"
 contexts = ["workspace"]
 command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint picker-current --placement split --direction down --cwd \"$cwd\" --focus"]
 
-# Dispatch action: task-first spawn. Opens a centered composer overlay where you
+# Dispatch action: task-first spawn. Opens a compact composer popup where you
 # describe the work; the branch name is derived from the text, the worktree is
 # created via wt (hooks run), and a coding agent starts in it with the task as
-# its opening prompt.
+# its opening prompt. From a workspace the target repo is that workspace's;
+# invoked globally the composer resolves it from the task text (>repo token or
+# a repo name mentioned in it) with an fzf picker as fallback.
 [[actions]]
 id = "dispatch"
 title = "Sow: worktree + agent from a task prompt"
-contexts = ["workspace"]
-command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint composer --placement overlay --cwd \"$cwd\" --focus"]
+contexts = ["workspace", "global"]
+command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd // empty' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); if [ -n \"$cwd\" ]; then exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint composer --placement popup --width 78 --height 18 --cwd \"$cwd\" --focus; else exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint composer --placement popup --width 78 --height 18 --cwd \"$HOME\" --env WORKTRUNK_COMPOSER_GLOBAL=1 --focus; fi"]
 
 # Remove actions: direct current-worktree removal for the common case, plus the
 # picker for cleanup elsewhere.
@@ -61,7 +63,7 @@ command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/picker.sh\" --create-ba
 [[panes]]
 id = "composer"
 title = "Sow — dispatch a task"
-placement = "overlay"
+placement = "popup"
 command = ["bash", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/composer.sh\""]
 
 [[panes]]

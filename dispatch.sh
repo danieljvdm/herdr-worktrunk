@@ -26,6 +26,9 @@
 #       --no-focus     open the workspace without stealing focus, and announce
 #                      via a herdr notification instead; the default comes
 #                      from the dispatch_focus plugin config key (true)
+#       --pick-repo    interactive repo resolution (used by the composer's
+#                      global mode): match the task text against open repos,
+#                      falling back to an fzf picker
 #       --hold         on failure, wait for a keypress before exiting (for
 #                      transient plugin panes)
 #       --slug TEXT    print the branch name derived from TEXT and exit
@@ -34,6 +37,8 @@
 # Inline grammar (parsed from the front of the task text, flags win):
 #   @claude / @codex / @KIND   pick the agent
 #   some-branch-name:          pick the branch (first word, ending in `:`)
+#   >repo                     pick the target repository: a path, or the name
+#                              of a repo with a pane open in this session
 #
 # Environment:
 #   WORKTRUNK_BRANCH_HINT  branch to use when neither -b nor grammar name one
@@ -97,6 +102,59 @@ name_branch_with_model() {
   printf '%s\n' "$out"
 }
 
+# Resolve a `>token` from the grammar to a repository path: an existing
+# directory wins, then an exact open-repo name, then a unique substring match.
+resolve_repo_token() {
+  local token=$1 repos path name hits=''
+  [[ -d $token ]] && { printf '%s\n' "$token"; return 0; }
+  repos=$(worktrunk_open_repos)
+  while IFS=$'\t' read -r path name; do
+    [[ $name == "$token" ]] && { printf '%s\n' "$path"; return 0; }
+  done <<<"$repos"
+  while IFS=$'\t' read -r path name; do
+    case $name in *"$token"*) hits+="$path"$'\n' ;; esac
+  done <<<"$repos"
+  hits=${hits%$'\n'}
+  [[ -n $hits && $(printf '%s\n' "$hits" | wc -l) -eq 1 ]] \
+    && { printf '%s\n' "$hits"; return 0; }
+  return 1
+}
+
+# Interactive repo resolution for the composer's global mode: a repo name
+# appearing in the task text wins when it is unique; otherwise fzf over open
+# repos with the UI-focused repo listed first. Returns 130 on picker cancel.
+pick_repo_for_task() {
+  local task_text=$1 repos path name task_lc name_lc hits='' focused focused_root choice
+  repos=$(worktrunk_open_repos)
+  [[ -z $repos ]] && return 1
+  task_lc=$(printf '%s' "$task_text" | tr '[:upper:]' '[:lower:]')
+  while IFS=$'\t' read -r path name; do
+    name_lc=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+    case " $task_lc " in *"$name_lc"*) hits+="$path"$'\n' ;; esac
+  done <<<"$repos"
+  hits=${hits%$'\n'}
+  if [[ -n $hits && $(printf '%s\n' "$hits" | wc -l) -eq 1 ]]; then
+    printf '%s\n' "$hits"
+    return 0
+  fi
+  command -v fzf >/dev/null || return 1
+  focused=$("$herdr" pane current 2>/dev/null \
+    | jq -r '[.. | objects | .cwd? // empty] | first // empty')
+  focused_root=''
+  if [[ -n $focused ]]; then
+    focused_root=$(git -C "$focused" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    focused_root=${focused_root%/.git}
+  fi
+  choice=$(
+    {
+      [[ -n $focused_root ]] && printf '%s\n' "$repos" | awk -F'\t' -v f="$focused_root" '$1 == f'
+      printf '%s\n' "$repos" | awk -F'\t' -v f="$focused_root" '$1 != f'
+    } | fzf --with-nth=2 --delimiter='\t' --reverse --no-info --border=rounded \
+          --prompt='repo ❯ ' --header='target repository · ↵ pick · esc cancel'
+  ) || return 130
+  printf '%s\n' "${choice%%$'\t'*}"
+}
+
 # Derive a branch name from task text: lowercase, alphanumeric words, minus
 # filler words, first four words joined with dashes, capped at 40 chars.
 worktrunk_slug() {
@@ -122,11 +180,14 @@ parse_grammar() {
   task=$1
   grammar_agent=''
   grammar_branch=''
+  grammar_repo=''
   while :; do
     task=${task#"${task%%[![:space:]]*}"}
     first=${task%%[[:space:]]*}
     if [[ $first == @[a-z]* && $first != *:* ]]; then
       grammar_agent=${first#@}
+    elif [[ $first == '>'?* ]]; then
+      grammar_repo=${first#>}
     elif [[ $first =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*:$ ]]; then
       grammar_branch=${first%:}
     else
@@ -141,6 +202,8 @@ agent_kind=''
 branch=''
 base=''
 repo=''
+repo_token=''
+pick_repo=false
 focus=$(worktrunk_dispatch_focus)
 task=''
 stdin_task=false
@@ -151,6 +214,7 @@ while [[ $# -gt 0 ]]; do
     --claude|--codex) agent_kind=${1#--}; shift ;;
     -b|--branch) branch=${2:?--branch needs a name}; shift 2 ;;
     --repo|-C) repo=${2:?--repo needs a path}; shift 2 ;;
+    --pick-repo) pick_repo=true; shift ;;
     --base) base=${2:?--base needs a ref}; shift 2 ;;
     --here) base='@'; shift ;;
     --focus) focus=true; shift ;;
@@ -161,9 +225,11 @@ while [[ $# -gt 0 ]]; do
       parse_grammar "$*"
       preview_branch=${grammar_branch:-${WORKTRUNK_BRANCH_HINT:-(model-named)}}
       preview_agent=${grammar_agent:-$(worktrunk_default_agent)}
-      printf 'branch: %s · agent: %s\n' "${preview_branch:-—}" "$preview_agent"
+      preview="branch: ${preview_branch:-—} · agent: $preview_agent"
+      [[ -n $grammar_repo ]] && preview+=" · repo: $grammar_repo"
+      printf '%s\n' "$preview"
       exit 0 ;;
-    -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -) stdin_task=true; shift ;;
     --) shift; task="$*"; break ;;
     -*) die "unknown option: $1" ;;
@@ -177,11 +243,21 @@ else
   parse_grammar "$task"
   [[ -n $grammar_agent && -z $agent_kind ]] && agent_kind=$grammar_agent
   [[ -n $grammar_branch && -z $branch ]] && branch=$grammar_branch
+  [[ -n $grammar_repo && -z $repo ]] && repo_token=$grammar_repo
 fi
 [[ -z ${task// /} ]] && die "no task text given (see --help)"
 
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
 [[ -n ${HERDR_WORKSPACE_ID:-} ]] || die "sow only works inside a herdr session"
+if [[ -n $repo_token ]]; then
+  repo=$(resolve_repo_token "$repo_token") || die "no open repository matches '>$repo_token' — open repos: $(worktrunk_open_repos | cut -f2 | tr '\n' ' ')"
+fi
+if [[ -z $repo && $pick_repo == true ]]; then
+  repo=$(pick_repo_for_task "$task")
+  pick_rc=$?
+  [[ $pick_rc -eq 130 ]] && exit 0
+  [[ $pick_rc -ne 0 || -z $repo ]] && die "could not resolve a target repository; pass --repo PATH"
+fi
 if [[ -n $repo ]]; then
   cd "$repo" 2>/dev/null || die "no such directory: $repo"
 fi

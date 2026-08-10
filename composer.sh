@@ -21,10 +21,14 @@ source "$plugin_root/config.sh"
 
 branch_hint=${WORKTRUNK_COMPOSER_BRANCH:-}
 base_hint=${WORKTRUNK_COMPOSER_BASE:-}
+global_mode=${WORKTRUNK_COMPOSER_GLOBAL:-}
 default_agent=$(worktrunk_default_agent)
 
 hint_line="@claude / @codex picks the agent · name: picks the branch · esc cancels"
-if [[ -n $branch_hint ]]; then
+if [[ -n $global_mode ]]; then
+  hint_line=">repo or a repo named in the task picks the target · $hint_line"
+  header_line="global sow · agent: $default_agent"
+elif [[ -n $branch_hint ]]; then
   header_line="branch: $branch_hint · agent: $default_agent"
 else
   header_line="branch: named from your task · agent: $default_agent"
@@ -33,7 +37,7 @@ fi
 if command -v fzf >/dev/null; then
   task=$(
     : | fzf --disabled --print-query --no-info --reverse \
-        --border=rounded --margin=20%,15% \
+        --border=rounded --margin=0,1 \
         --prompt='sow ❯ ' \
         --header="$header_line
 $hint_line"
@@ -50,4 +54,5 @@ fi
 args=(--hold)
 [[ -n $branch_hint ]] && export WORKTRUNK_BRANCH_HINT=$branch_hint
 [[ -n $base_hint ]] && args+=(--base "$base_hint")
+[[ -n $global_mode ]] && args+=(--pick-repo)
 exec bash "$plugin_root/dispatch.sh" "${args[@]}" -- "$task"

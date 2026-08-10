@@ -47,6 +47,10 @@ assert_preview 'branch: fix-login · agent: codex' "fix-login: @codex repair the
 assert_preview 'branch: (model-named) · agent: claude' "@claude repair the login flow"
 assert_preview 'branch: (model-named) · agent: claude' "repair the login flow"
 
+# >repo grammar peels off alongside the others, in any order.
+assert_preview 'branch: fix-login · agent: codex · repo: egte' "@codex >egte fix-login: repair the login flow"
+assert_preview 'branch: (model-named) · agent: claude · repo: ../elsewhere' ">../elsewhere repair the login flow"
+
 # A branch hint fills in when the grammar names none.
 WORKTRUNK_BRANCH_HINT=hinted-branch \
   assert_preview 'branch: hinted-branch · agent: claude' "repair the login flow"

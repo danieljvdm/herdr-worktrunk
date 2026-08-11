@@ -1,6 +1,6 @@
 id = "worktrunk"
 name = "Worktrunk"
-version = "0.4.0"
+version = "0.5.0"
 min_herdr_version = "0.7.0"
 description = "Switch, create, or remove git worktrees via worktrunk"
 platforms = ["macos", "linux"]
@@ -33,18 +33,21 @@ contexts = ["workspace", "global"]
 command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd // empty' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); if [ -n \"$cwd\" ]; then exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint composer --placement popup --width 78 --height 18 --cwd \"$cwd\" --focus; else exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint composer --placement popup --width 78 --height 18 --cwd \"$HOME\" --env WORKTRUNK_COMPOSER_GLOBAL=1 --focus; fi"]
 
 # Remove actions: direct current-worktree removal for the common case, plus the
-# picker for cleanup elsewhere.
+# picker for cleanup elsewhere. Both pin the invoking workspace and the
+# resolved worktree path (herdr's own worktree model) into the remover pane's
+# environment at keypress time — focus can move before the pane opens, and
+# re-deriving the target from ambient focus has removed the wrong worktree.
 [[actions]]
 id = "remove-current"
 title = "Worktree: remove current"
 contexts = ["workspace"]
-command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint remover-current --placement split --direction down --cwd \"$cwd\" --focus"]
+command = ["bash", "-c", "ctx=\"$HERDR_PLUGIN_CONTEXT_JSON\"; ws=$(jq -r '.workspace_id // empty' <<<\"$ctx\"); wslabel=$(jq -r '.workspace_label // empty' <<<\"$ctx\"); checkout=$(jq -r '.worktree.checkout_path // empty' <<<\"$ctx\"); cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$ctx\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint remover-current --placement split --direction down ${ws:+--workspace \"$ws\"} --cwd \"$cwd\" --env WORKTRUNK_REMOVE_CHECKOUT=\"$checkout\" --env WORKTRUNK_REMOVE_WORKSPACE=\"$ws\" --env WORKTRUNK_REMOVE_WORKSPACE_LABEL=\"$wslabel\" --focus"]
 
 [[actions]]
 id = "remove"
 title = "Worktree: remove any"
 contexts = ["workspace"]
-command = ["bash", "-c", "cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$HERDR_PLUGIN_CONTEXT_JSON\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint remover --placement split --direction down --cwd \"$cwd\" --focus"]
+command = ["bash", "-c", "ctx=\"$HERDR_PLUGIN_CONTEXT_JSON\"; ws=$(jq -r '.workspace_id // empty' <<<\"$ctx\"); cwd=$(jq -r '.workspace_cwd // .focused_pane_cwd' <<<\"$ctx\"); exec \"$HERDR_BIN_PATH\" plugin pane open --plugin \"$HERDR_PLUGIN_ID\" --entrypoint remover --placement split --direction down ${ws:+--workspace \"$ws\"} --cwd \"$cwd\" --focus"]
 
 # PR status: report the current worktree's GitHub PR (if any) as workspace
 # metadata (a `$pr` token for [ui.sidebar.spaces]), and open it in a browser.

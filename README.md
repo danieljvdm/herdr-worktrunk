@@ -91,15 +91,24 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   if that repo has no herdr workspace open yet, its root opens as a
   background workspace so the worktree has a parent to register under.
 
-- **Worktree: remove current** — removes the worktree containing the focused
-  workspace without opening a picker. Worktrunk still applies its dirty/unmerged
-  safeguards; on success, the associated Herdr workspace closes.
+- **Worktree: remove current** — removes the worktree of the workspace the
+  action was invoked from. The target worktree and workspace are pinned into
+  the remover's environment at keypress time (from herdr's worktree model), so
+  focus moving before the pane opens can no longer redirect the removal. A
+  confirmation summary shows the branch, path, uncommitted-change count, any
+  live agents in the workspace (with a red warning if one is still working),
+  and the workspace that will close; `y` proceeds, anything else cancels.
+  Worktrunk still applies its dirty/unmerged safeguards. Non-interactive
+  callers (agents reaping via `remove.sh --current`, or `--yes`) skip the
+  confirmation. A pane whose shell survives an *interrupted* removal — its cwd
+  stranded under `.git/wt/trash/` — is recognized and offered a cleanup
+  (delete the trash copy, close the workspace) instead of a resolution error.
 
 - **Worktree: remove any** — opens an fzf picker over removable worktrees
-  (everything except the main checkout). Pick one; worktrunk gates unmerged
-  branches and untracked files itself, then removes it. The native workspace or
-  any legacy tab panes associated with the deleted worktree are closed
-  automatically.
+  (everything except the main checkout). Pick one, then the same confirmation
+  summary as above; worktrunk gates unmerged branches and untracked files
+  itself, then removes it. The native workspace or any legacy tab panes
+  associated with the deleted worktree are closed automatically.
 
 - **Worktree: refresh PR status** / **Worktree: open PR in browser** — the
   focused workspace's checkout is queried with `gh pr view`; refresh reports

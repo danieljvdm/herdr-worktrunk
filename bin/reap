@@ -9,12 +9,25 @@
 # goodbye first, then run `reap` as the last command. Nothing after it runs.
 set -euo pipefail
 
-plugin_root=$(herdr plugin list --plugin worktrunk --json 2>/dev/null \
-  | jq -r '[.. | objects | .plugin_root? // empty] | first // empty')
+# Resolving the plugin root costs two subprocess spawns (herdr + jq), which
+# endpoint security on managed machines taxes at ~200ms each — cache it. A
+# reinstall moves the plugin to a new hash-suffixed path, which fails the
+# -f check below and forces a re-resolve.
+cache_file=${XDG_CACHE_HOME:-$HOME/.cache}/herdr-worktrunk/plugin-root
+plugin_root=""
+if [[ -r $cache_file ]]; then
+  IFS= read -r plugin_root < "$cache_file" || true
+fi
 if [[ -z $plugin_root || ! -f $plugin_root/remove.sh ]]; then
-  echo "reap: worktrunk herdr plugin not installed (herdr plugin install danieljvdm/herdr-worktrunk)" >&2
-  exit 1
+  plugin_root=$(herdr plugin list --plugin worktrunk --json 2>/dev/null \
+    | jq -r '[.. | objects | .plugin_root? // empty] | first // empty')
+  if [[ -z $plugin_root || ! -f $plugin_root/remove.sh ]]; then
+    echo "reap: worktrunk herdr plugin not installed (herdr plugin install danieljvdm/herdr-worktrunk)" >&2
+    exit 1
+  fi
+  mkdir -p "${cache_file%/*}"
+  printf '%s\n' "$plugin_root" > "$cache_file"
 fi
 
 export HERDR_PLUGIN_ROOT=$plugin_root
-exec bash "$plugin_root/remove.sh" --current
+exec bash "$plugin_root/remove.sh" --current "$@"

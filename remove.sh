@@ -99,32 +99,40 @@ fi
 if ! wtitems=$(printf '%s\n' "$wtjson" | worktrunk_list_items); then
   fail "unsupported worktrunk list output"
 fi
-repo_path=$(printf '%s\n' "$wtitems" \
-  | jq -r 'select(.kind == "worktree" and .is_main == true) | .path' \
-  | head -n1)
-[[ -z $repo_path ]] && repo_path=$PWD
 
 if [[ $remove_mode == current ]]; then
-  if [[ -n $pinned_checkout ]]; then
-    current=$(printf '%s\n' "$wtitems" \
-      | jq -c --arg p "$pinned_checkout" \
-          'select(.kind == "worktree" and .path == $p)' \
-      | head -n1)
-    [[ -z $current ]] && fail "pinned worktree is not registered: $pinned_checkout"
-  else
-    current=$(printf '%s\n' "$wtjson" | worktrunk_current_worktree)
-    [[ -z $current ]] && fail "could not resolve the current worktree"
+  # One jq pass for everything this mode needs: the primary checkout plus the
+  # pinned/current row. Process spawns cost ~200ms each under endpoint
+  # security on managed machines, so the hot path stays consolidated.
+  # Fields are joined with the unit separator: unlike tabs it is not
+  # IFS-whitespace, so empty fields survive the read.
+  resolved=$(printf '%s\n' "$wtitems" | jq -rs --arg pin "$pinned_checkout" '
+    (map(select(.kind == "worktree" and .is_main == true)) | first | .path // "") as $repo
+    | (map(select(.kind == "worktree"
+        and (if $pin != "" then .path == $pin else .is_current == true end)))
+       | first) as $t
+    | if $t == null then "\($repo)\u001f\u001f\u001fmissing"
+      else "\($repo)\u001f\($t.branch // "")\u001f\($t.path // "")\u001f\($t.is_main)" end')
+  IFS=$'\x1f' read -r repo_path name wtpath is_main <<<"$resolved"
+  [[ -z $repo_path ]] && repo_path=$PWD
+
+  if [[ $is_main == missing ]]; then
+    if [[ -n $pinned_checkout ]]; then
+      fail "pinned worktree is not registered: $pinned_checkout"
+    fi
+    fail "could not resolve the current worktree"
   fi
-  if [[ $(printf '%s\n' "$current" | jq -r '.is_main') == true ]]; then
+  if [[ $is_main == true ]]; then
     printf '\033[33m%s\033[0m\n' "The primary worktree cannot be removed."
     [[ -t 0 ]] && sleep 2
     exit 0
   fi
-
-  name=$(printf '%s\n' "$current" | jq -r '.branch // empty')
-  wtpath=$(printf '%s\n' "$current" | jq -r '.path // empty')
   target=${name:-$wtpath}
 else
+  repo_path=$(printf '%s\n' "$wtitems" \
+    | jq -r 'select(.kind == "worktree" and .is_main == true) | .path' \
+    | head -n1)
+  [[ -z $repo_path ]] && repo_path=$PWD
   # Removable = any real worktree except the main one (the primary checkout
   # cannot be removed). The current worktree is included.
   cands=$(printf '%s\n' "$wtitems" \
@@ -167,8 +175,14 @@ fi
 # target can differ from where the user thinks focus is.
 # ---------------------------------------------------------------------------
 if [[ -t 0 && $assume_yes == 0 ]]; then
-  changes=$(git -C "$wtpath" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
-  [[ $changes == 0 ]] && changes_label="clean" || changes_label="$changes uncommitted path(s)"
+  status_out=$(git -C "$wtpath" status --porcelain 2>/dev/null)
+  if [[ -z $status_out ]]; then
+    changes_label="clean"
+  else
+    changes=0
+    while IFS= read -r _; do ((changes++)); done <<<"$status_out"
+    changes_label="$changes uncommitted path(s)"
+  fi
   agents=$("$herdr" agent list 2>/dev/null \
     | jq -r --arg p "$wtpath" \
         '.result.agents[]? | select(.cwd == $p or (.cwd | startswith($p + "/")))
@@ -182,10 +196,11 @@ if [[ -t 0 && $assume_yes == 0 ]]; then
     printf '  closes   workspace %s%s\n' "$wsid" "${pinned_ws_label:+ ($pinned_ws_label)}"
   fi
   if [[ -n $agents ]]; then
-    if printf '%s' "$agents" | grep -q '\[working\]'; then
-      printf '  \033[31magents   %s — still working!\033[0m\n' "$(printf '%s' "$agents" | tr '\n' ';')"
+    agents_line=${agents//$'\n'/; }
+    if [[ $agents == *"[working]"* ]]; then
+      printf '  \033[31magents   %s — still working!\033[0m\n' "$agents_line"
     else
-      printf '  agents   %s\n' "$(printf '%s' "$agents" | tr '\n' ';')"
+      printf '  agents   %s\n' "$agents_line"
     fi
   fi
   printf '\n\033[1my\033[0m to remove · any other key cancels '
@@ -195,11 +210,13 @@ fi
 
 # Run from the primary checkout so removing this pane's own worktree does not
 # require shell integration to cd the plain Bash plugin process elsewhere.
-# Worktrunk still runs hooks in the target worktree and gates dirty/unmerged
-# deletion. --foreground keeps the pane until removal is complete.
+# Worktrunk gates dirty/unmerged deletion synchronously, then detaches the
+# actual file deletion into the background — verified to survive this caller
+# (and its pane) dying immediately afterward, so no --foreground: waiting for
+# a 4.5GB node_modules to unlink is what made reap feel broken.
 # Fail with a real exit code for scripted callers (agents reaping their own
 # session via `remove.sh --current`); only block for a keypress on a TTY.
-if ! wt -C "$repo_path" remove --foreground "$target"; then
+if ! wt -C "$repo_path" remove "$target"; then
   printf '\n\033[31m%s\033[0m' "wt remove failed (see above)."
   if [[ -t 0 ]]; then
     printf ' press any key to close'

@@ -1,6 +1,6 @@
 id = "worktrunk"
 name = "Worktrunk"
-version = "0.5.1"
+version = "0.5.2"
 min_herdr_version = "0.7.0"
 description = "Switch, create, or remove git worktrees via worktrunk"
 platforms = ["macos", "linux"]

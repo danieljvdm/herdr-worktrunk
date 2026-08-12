@@ -86,4 +86,57 @@ assert_named fix-auth "printf 'Fix Auth!\\n'"
 assert_named fix-auth "printf 'chatter\\nfix-auth\\n'"      # last line wins
 assert_named fix-auth "printf '  --fix-auth--  \\n'"        # trimmed + squeezed
 
+# --model/--effort/--speed map onto agent-specific launch arguments.
+assert_settings_args() {
+  local expected=$1 kind=$2 model=$3 effort=$4 speed=$5
+  local actual
+  actual=$(HERDR_PLUGIN_ROOT=$repo_root \
+    bash -c 'source "$1"; shift; agent_settings_args "$@"' _ "$dispatch_lib" \
+    "$kind" "$model" "$effort" "$speed" | tr '\n' ' ')
+  actual=${actual% }
+  if [[ $actual != "$expected" ]]; then
+    printf 'expected settings args %q for %s, got %q\n' "$expected" "$kind" "$actual" >&2
+    exit 1
+  fi
+}
+
+assert_settings_args \
+  '-m gpt-5.6-sol -c model_reasoning_effort=high -c service_tier=fast' \
+  codex gpt-5.6-sol high fast
+# normal is the explicit `default` sentinel, not an absent key — the only
+# way to suppress a model catalog's default_service_tier.
+assert_settings_args '-c service_tier=default' codex '' '' normal
+assert_settings_args '--model opus --effort xhigh' claude opus xhigh ''
+assert_settings_args '' codex '' '' ''
+assert_settings_args '' claude '' '' normal   # no claude launch flag for speed
+
+# Footer verification: the live session is authoritative over the request.
+assert_mismatches() {
+  local expected=$1 footer=$2 model=$3 effort=$4 speed=$5
+  local actual
+  actual=$(HERDR_PLUGIN_ROOT=$repo_root \
+    bash -c 'source "$1"; shift; settings_footer_mismatches "$@"' _ "$dispatch_lib" \
+    "$footer" "$model" "$effort" "$speed")
+  if [[ $actual != "$expected" ]]; then
+    printf 'expected mismatches %q for footer %q, got %q\n' "$expected" "$footer" "$actual" >&2
+    exit 1
+  fi
+}
+
+footer='gpt-5.6-sol high fast · 82% context left'
+assert_mismatches '' "$footer" gpt-5.6-sol high fast
+assert_mismatches 'speed normal (session is fast)' "$footer" gpt-5.6-sol high normal
+assert_mismatches 'effort xhigh' "$footer" '' xhigh ''
+assert_mismatches '' 'gpt-5.6-sol ultra' '' xhigh ''     # sol shows xhigh as ultra
+assert_mismatches 'model gpt-5.6-sol' 'gpt-5.5-codex high fast' gpt-5.6-sol '' ''
+assert_mismatches '' 'gpt-5.6-sol high' gpt-5.6-sol high normal
+# "fast" must match as a word, not inside e.g. a branch named fastlane.
+assert_mismatches 'speed fast' 'gpt-5.6-sol high · fastlane-fix' '' '' fast
+
+# --speed rejects anything but fast/normal.
+if bash "$dispatch" --speed sluggish --slug "fix auth" >/dev/null 2>&1; then
+  printf 'expected --speed to reject unknown tiers\n' >&2
+  exit 1
+fi
+
 printf 'dispatch tests passed\n'

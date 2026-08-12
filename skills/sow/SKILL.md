@@ -34,6 +34,24 @@ EOF
   repo's primary checkout and asking it to arrange its own worktree.
 - `--base REF` bases the new branch on REF; `--here` uses the current branch.
   Default is the repo's default branch.
+- `--model ID`, `--effort LEVEL`, `--speed fast|normal` set the agent's
+  model, reasoning effort, and speed tier for this dispatch (codex: `-m`,
+  `-c model_reasoning_effort=`, `-c service_tier=`; claude: `--model`,
+  `--effort`). Omitted flags keep the agent's configured defaults. When any
+  are passed, state the chosen settings in your dispatch report.
+  - `--speed normal` on codex sets `service_tier=default` — the explicit
+    sentinel that suppresses a model catalog's default tier. gpt-5.6-sol's
+    catalog defaults to fast, so a codex dispatch that must not run fast
+    needs `--speed normal`; leaving the flag off means fast.
+  - claude has no fast-mode launch flag (`/fast` is an in-session toggle),
+    so `--speed fast --claude` is rejected.
+
+After a codex launch with any of these flags, `sow` reads the live TUI
+footer (e.g. `gpt-5.6-sol high fast`) and verifies it against the request —
+the footer is authoritative, since config layers can override launch flags.
+A `⚠ agent settings mismatch` warning means the session is NOT running the
+requested settings; surface it to the user rather than proceeding as if it
+were.
 
 On success `sow` prints the branch, workspace id, and agent name. Report those
 to the user and continue your own work — do not wait for the spawned agent.

@@ -82,6 +82,7 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   sow "fix the flaky token refresh in auth"        # branch + agent, one shot
   sow --codex "bump node to 22"                    # pick the agent
   sow --repo ~/dev/other-repo "fix the CI flake"   # dispatch into another repo
+  sow --codex --effort xhigh --speed normal "..."  # pin the agent's settings
   sow -b fix-auth --no-focus - <<'EOF'             # scripted, prompt on stdin
   Fix the flaky token refresh...
   EOF
@@ -90,6 +91,14 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   `--repo` dispatches into a repository other than the current directory's;
   if that repo has no herdr workspace open yet, its root opens as a
   background workspace so the worktree has a parent to register under.
+
+  `--model`, `--effort`, and `--speed fast|normal` pass per-dispatch agent
+  settings through to the launch (codex: `-m`, `-c model_reasoning_effort=`,
+  `-c service_tier=`; claude: `--model`, `--effort`). On codex, `--speed
+  normal` sets the explicit `service_tier=default` sentinel — the only value
+  that suppresses a model catalog's default tier — and after launch the live
+  TUI footer is read back, with any divergence from the request reported
+  loudly; the footer, not the flags, is what the session actually runs.
 
 - **Worktree: remove current** — removes the worktree of the workspace the
   action was invoked from. The target worktree and workspace are pinned into

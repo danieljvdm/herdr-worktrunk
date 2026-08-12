@@ -22,6 +22,17 @@
 #                      open yet (alias: -C)
 #       --base REF     base ref for a newly created branch (worktrunk syntax)
 #       --here         shorthand for --base @ (current branch)
+#       --model ID     launch the agent on this model (codex: -m ID,
+#                      claude: --model ID)
+#       --effort LEVEL reasoning effort (codex: -c model_reasoning_effort=LEVEL,
+#                      claude: --effort LEVEL)
+#       --speed TIER   fast | normal. For codex this sets service_tier: fast,
+#                      or the explicit `default` sentinel for normal — the only
+#                      value that suppresses a model catalog's default tier
+#                      (gpt-5.6-sol's catalog defaults to fast; omitting the
+#                      key does NOT). claude has no fast-mode launch flag, so
+#                      --speed fast with a claude agent is an error (/fast is
+#                      an in-session toggle).
 #       --focus        switch to the new workspace when it opens
 #       --no-focus     open the workspace without stealing focus, and announce
 #                      via a herdr notification instead; the default comes
@@ -119,7 +130,63 @@ worktrunk_slug() {
   printf '%s\n' "${out:0:40}"
 }
 
+# Map the portable --model/--effort/--speed flags onto agent-specific launch
+# arguments, one per line (empty flags emit nothing). Codex speed maps to the
+# top-level service_tier config key: "fast" is the fast/priority tier, and
+# normal is the explicit `default` sentinel — the only value that suppresses
+# a model catalog's default_service_tier (gpt-5.6-sol's catalog defaults to
+# "priority", so leaving the key unset still launches fast).
+agent_settings_args() {
+  local kind=$1 model=$2 effort=$3 speed=$4
+  case $kind in
+    codex)
+      [[ -n $model ]] && printf '%s\n' -m "$model"
+      [[ -n $effort ]] && printf '%s\n' -c "model_reasoning_effort=$effort"
+      case $speed in
+        fast) printf '%s\n' -c 'service_tier=fast' ;;
+        normal) printf '%s\n' -c 'service_tier=default' ;;
+      esac
+      ;;
+    claude)
+      [[ -n $model ]] && printf '%s\n' --model "$model"
+      [[ -n $effort ]] && printf '%s\n' --effort "$effort"
+      ;;
+  esac
+  return 0
+}
+
+# Compare requested settings against the live TUI's footer text: one line per
+# mismatch, empty output when everything checks out. The footer is
+# authoritative over what was requested — config layers (notably codex model
+# catalogs) can override launch flags, so only the running session proves
+# what actually applies. Codex renders "<model> <effort> [fast]"; sol
+# displays its xhigh effort as "ultra".
+settings_footer_mismatches() {
+  local footer=$1 model=$2 effort=$3 speed=$4 pattern
+  if [[ -n $model ]] && ! grep -qF -- "$model" <<<"$footer"; then
+    printf 'model %s\n' "$model"
+  fi
+  if [[ -n $effort ]]; then
+    pattern=$effort
+    [[ $effort == xhigh ]] && pattern='(xhigh|ultra)'
+    grep -qiE "(^|[^[:alpha:]])${pattern}([^[:alpha:]]|$)" <<<"$footer" \
+      || printf 'effort %s\n' "$effort"
+  fi
+  case $speed in
+    fast)
+      grep -qiE '(^|[^[:alpha:]])fast([^[:alpha:]]|$)' <<<"$footer" \
+        || printf 'speed fast\n' ;;
+    normal)
+      grep -qiE '(^|[^[:alpha:]])fast([^[:alpha:]]|$)' <<<"$footer" \
+        && printf 'speed normal (session is fast)\n' ;;
+  esac
+  return 0
+}
+
 agent_kind=''
+agent_model=''
+agent_effort=''
+agent_speed=''
 branch=''
 base=''
 repo=''
@@ -138,6 +205,10 @@ while [[ $# -gt 0 ]]; do
     --pick-repo) pick_repo=true; shift ;;
     --base) base=${2:?--base needs a ref}; shift 2 ;;
     --here) base='@'; shift ;;
+    --model) agent_model=${2:?--model needs a model id}; shift 2 ;;
+    --effort) agent_effort=${2:?--effort needs a level}; shift 2 ;;
+    --speed) agent_speed=${2:?--speed needs fast or normal}; shift 2
+      case $agent_speed in fast|normal) ;; *) die "--speed must be fast or normal, not: $agent_speed" ;; esac ;;
     --focus) focus=true; shift ;;
     --no-focus) focus=false; shift ;;
     --hold) hold=true; shift ;;
@@ -150,7 +221,7 @@ while [[ $# -gt 0 ]]; do
       [[ -n $grammar_repo ]] && preview+=" · repo: $grammar_repo"
       printf '%s\n' "$preview"
       exit 0 ;;
-    -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -) stdin_task=true; shift ;;
     --) shift; task="$*"; break ;;
     -*) die "unknown option: $1" ;;
@@ -169,6 +240,18 @@ fi
 [[ -z ${task// /} ]] && die "no task text given (see --help)"
 
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
+if [[ -n $agent_model || -n $agent_effort || -n $agent_speed ]]; then
+  case $agent_kind in
+    codex|claude) ;;
+    *) die "--model/--effort/--speed are only wired up for codex and claude, not: $agent_kind" ;;
+  esac
+  [[ $agent_kind == claude && $agent_speed == fast ]] \
+    && die "claude has no fast-mode launch flag (/fast is an in-session toggle); drop --speed fast"
+fi
+agent_args=()
+while IFS= read -r arg; do
+  agent_args+=("$arg")
+done < <(agent_settings_args "$agent_kind" "$agent_model" "$agent_effort" "$agent_speed")
 # Reachability, not env: a global-context popup (and any plain terminal on
 # the same machine) has no HERDR_WORKSPACE_ID injected but can still talk to
 # the session over the socket.
@@ -277,10 +360,12 @@ fi
 # The fresh workspace's shell needs a moment to reach its prompt before it
 # counts as an available pane; retry rather than racing it.
 printf '\033[2m» starting %s in %s\033[0m\n' "$agent_kind" "$ws_id"
+start_cmd=("$herdr" agent start "$agent_name" --kind "$agent_kind" --pane "$pane_id")
+[[ ${#agent_args[@]} -gt 0 ]] && start_cmd+=(-- "${agent_args[@]}")
 started=false
 start_err=''
 for _ in $(seq 1 30); do
-  if start_err=$("$herdr" agent start "$agent_name" --kind "$agent_kind" --pane "$pane_id" 2>&1 >/dev/null); then
+  if start_err=$("${start_cmd[@]}" 2>&1 >/dev/null); then
     started=true
     break
   fi
@@ -332,6 +417,42 @@ if [[ $submitted == false ]]; then
     >/dev/null 2>&1 || true
   die "agent '$agent_name' is running but the task did not reach it (status: ${agent_status:-unknown}).
 Dismiss whatever is on its screen, then: $herdr agent prompt $agent_name '<task>'"
+fi
+
+# Requested settings are a claim; the live session is the fact. Codex's TUI
+# footer renders the model, effort, and speed tier actually in force (config
+# layers like model catalogs can override launch flags), so read it back and
+# refuse to stay quiet on a mismatch. Claude renders no such footer — its
+# flags are trusted because an invalid value fails the launch itself.
+if [[ -n $agent_model || -n $agent_effort || -n $agent_speed ]]; then
+  if [[ $agent_kind == codex ]]; then
+    # Codex's footer reads "<model> <effort> [fast] · <cwd>"; match on the
+    # " · " and check only the settings segment before it, so a cwd or prompt
+    # echo containing e.g. "fast" can't satisfy (or trip) the speed check.
+    visible=$("$herdr" agent read "$agent_name" --source visible 2>/dev/null)
+    footer_line=$(printf '%s\n' "$visible" | grep -F ' · ' | tail -n1 \
+      | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ -z $footer_line ]]; then
+      footer_line=$(printf '%s\n' "$visible" | grep -vE '^[[:space:]]*$' \
+        | tail -n1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    fi
+    mismatches=$(settings_footer_mismatches "${footer_line%%·*}" \
+      "$agent_model" "$agent_effort" "$agent_speed")
+    [[ -z $footer_line ]] && mismatches='(session footer unreadable)'
+    if [[ -n $mismatches ]]; then
+      printf '\033[1;31m⚠ agent settings mismatch\033[0m — the live session does not show:\n' >&2
+      printf '%s\n' "$mismatches" | sed 's/^/  requested /' >&2
+      printf '  session footer: %s\n' "${footer_line:-(unreadable)}" >&2
+      "$herdr" notification show "⚠️ $branch: agent settings mismatch" \
+        --body "requested $(printf '%s' "$mismatches" | tr '\n' ',') — footer: ${footer_line:-unreadable}" \
+        --sound request >/dev/null 2>&1 || true
+    else
+      printf '\033[2m» settings verified: %s\033[0m\n' "$footer_line"
+    fi
+  elif [[ ${#agent_args[@]} -gt 0 ]]; then
+    printf '\033[2m» %s launched with:%s\033[0m\n' "$agent_kind" \
+      "$(printf ' %s' "${agent_args[@]}")"
+  fi
 fi
 
 if [[ $focus == false ]]; then

@@ -43,8 +43,9 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   names the branch from your text, the worktree is created through `wt`
   (hooks run), it opens as a native worktree workspace, and a coding agent
   starts in its root pane with your task as the opening prompt. Inline
-  grammar: start with `@claude` / `@codex` (any `herdr agent start` kind) to
-  pick the agent, `some-branch-name:` to pick the branch yourself, or
+  grammar: start with `@claude`, `@codex`, or `@opencode2` (other
+  `herdr agent start` kinds also work) to pick the agent,
+  `some-branch-name:` to pick the branch yourself, or
   `>repo` (a path, or the name of any repo with a pane open) to target
   another repository. Set `default_agent = "codex"` in the plugin config to
   change the default agent (claude). Inside the switch/create pickers,
@@ -81,6 +82,8 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   ```bash
   sow "fix the flaky token refresh in auth"        # branch + agent, one shot
   sow --codex "bump node to 22"                    # pick the agent
+  sow --opencode2 --model xai/grok-4.6 "..."       # OpenCode 2 + Grok 4.6
+  sow --opencode2 --model xai/grok-4.6 --speed fast "..."
   sow --repo ~/dev/other-repo "fix the CI flake"   # dispatch into another repo
   sow --codex --effort xhigh --speed normal "..."  # pin the agent's settings
   sow -b fix-auth --no-focus - <<'EOF'             # scripted, prompt on stdin
@@ -94,11 +97,17 @@ opens as a tab or a native worktree workspace according to plugin configuration.
 
   `--model`, `--effort`, and `--speed fast|normal` pass per-dispatch agent
   settings through to the launch (codex: `-m`, `-c model_reasoning_effort=`,
-  `-c service_tier=`; claude: `--model`, `--effort`). On codex, `--speed
-  normal` sets the explicit `service_tier=default` sentinel — the only value
-  that suppresses a model catalog's default tier — and after launch the live
-  TUI footer is read back, with any divergence from the request reported
-  loudly; the footer, not the flags, is what the session actually runs.
+  `-c service_tier=`; claude: `--model`, `--effort`; OpenCode 2:
+  `opencode2 mini --model`). On OpenCode 2, speed is part of the model ID:
+  `--model xai/grok-4.6 --speed fast` resolves to `xai/grok-4.6-fast`, while
+  `normal` selects the base ID; `--speed` therefore requires `--model`, and
+  `--effort` is unsupported. The resolved ID is checked against the live
+  `opencode2 models` catalog before a worktree is created. On codex,
+  `--speed normal` sets the explicit `service_tier=default` sentinel — the
+  only value that suppresses a model catalog's default tier — and after
+  launch the live TUI footer is read back, with any divergence from the
+  request reported loudly; the footer, not the flags, is what the session
+  actually runs.
 
 - **Worktree: remove current** — removes the worktree of the workspace the
   action was invoked from. The target worktree and workspace are pinned into

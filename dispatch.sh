@@ -13,9 +13,11 @@
 #
 # Options:
 #   -a, --agent KIND   agent kind (any `herdr agent start` kind); default from
-#                      plugin config `default_agent`, else claude
+#                      plugin config `default_agent`, else claude; opencode2
+#                      uses the OpenCode 2 preview binary directly
 #       --claude       shorthand for --agent claude
 #       --codex        shorthand for --agent codex
+#       --opencode2    shorthand for --agent opencode2
 #   -b, --branch NAME  branch/worktree name (default: model-named from the task)
 #       --repo PATH    dispatch into this repository instead of the current
 #                      directory's; opens a root workspace for it if none is
@@ -23,16 +25,13 @@
 #       --base REF     base ref for a newly created branch (worktrunk syntax)
 #       --here         shorthand for --base @ (current branch)
 #       --model ID     launch the agent on this model (codex: -m ID,
-#                      claude: --model ID)
+#                      claude/opencode2: --model ID)
 #       --effort LEVEL reasoning effort (codex: -c model_reasoning_effort=LEVEL,
-#                      claude: --effort LEVEL)
-#       --speed TIER   fast | normal. For codex this sets service_tier: fast,
-#                      or the explicit `default` sentinel for normal — the only
-#                      value that suppresses a model catalog's default tier
-#                      (gpt-5.6-sol's catalog defaults to fast; omitting the
-#                      key does NOT). claude has no fast-mode launch flag, so
-#                      --speed fast with a claude agent is an error (/fast is
-#                      an in-session toggle).
+#                      claude: --effort LEVEL; unsupported by opencode2)
+#       --speed TIER   fast | normal. Codex maps this to service_tier.
+#                      OpenCode 2 maps the requested model between its base and
+#                      -fast catalog IDs (so it requires --model). Claude has no
+#                      fast-mode launch flag; normal is a no-op.
 #       --focus        switch to the new workspace when it opens
 #       --no-focus     open the workspace without stealing focus, and announce
 #                      via a herdr notification instead; the default comes
@@ -151,8 +150,27 @@ agent_settings_args() {
       [[ -n $model ]] && printf '%s\n' --model "$model"
       [[ -n $effort ]] && printf '%s\n' --effort "$effort"
       ;;
+    opencode2)
+      [[ -n $model ]] && printf '%s\n' --model "$model"
+      ;;
   esac
   return 0
+}
+
+# OpenCode exposes speed as distinct model IDs rather than a portable launch
+# flag. Resolve the requested base/fast form before validating it against the
+# live `opencode2 models` catalog.
+opencode2_model_for_speed() {
+  local model=$1 speed=$2
+  case $speed in
+    fast)
+      [[ $model == *-fast ]] || model+=-fast
+      ;;
+    normal)
+      model=${model%-fast}
+      ;;
+  esac
+  printf '%s\n' "$model"
 }
 
 # Compare requested settings against the live TUI's footer text: one line per
@@ -199,7 +217,7 @@ stdin_task=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     -a|--agent) agent_kind=${2:?--agent needs a kind}; shift 2 ;;
-    --claude|--codex) agent_kind=${1#--}; shift ;;
+    --claude|--codex|--opencode2) agent_kind=${1#--}; shift ;;
     -b|--branch) branch=${2:?--branch needs a name}; shift 2 ;;
     --repo|-C) repo=${2:?--repo needs a path}; shift 2 ;;
     --pick-repo) pick_repo=true; shift ;;
@@ -242,11 +260,25 @@ fi
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
 if [[ -n $agent_model || -n $agent_effort || -n $agent_speed ]]; then
   case $agent_kind in
-    codex|claude) ;;
-    *) die "--model/--effort/--speed are only wired up for codex and claude, not: $agent_kind" ;;
+    codex|claude|opencode2) ;;
+    *) die "--model/--effort/--speed are only wired up for codex, claude, and opencode2, not: $agent_kind" ;;
   esac
   [[ $agent_kind == claude && $agent_speed == fast ]] \
     && die "claude has no fast-mode launch flag (/fast is an in-session toggle); drop --speed fast"
+  [[ $agent_kind == opencode2 && -n $agent_effort ]] \
+    && die "opencode2 has no reasoning-effort launch flag; choose a model instead"
+  if [[ $agent_kind == opencode2 && -n $agent_speed ]]; then
+    [[ -n $agent_model ]] \
+      || die "opencode2 encodes speed in model IDs; pass --model with --speed"
+    agent_model=$(opencode2_model_for_speed "$agent_model" "$agent_speed")
+  fi
+fi
+if [[ $agent_kind == opencode2 ]]; then
+  command -v opencode2 >/dev/null 2>&1 \
+    || die "opencode2 is not on PATH"
+  if [[ -n $agent_model ]] && ! opencode2 models 2>/dev/null | grep -qxF -- "$agent_model"; then
+    die "opencode2 model not found in the live catalog: $agent_model"
+  fi
 fi
 agent_args=()
 while IFS= read -r arg; do
@@ -359,18 +391,40 @@ fi
 
 # The fresh workspace's shell needs a moment to reach its prompt before it
 # counts as an available pane; retry rather than racing it.
-printf '\033[2m» starting %s in %s\033[0m\n' "$agent_kind" "$ws_id"
-start_cmd=("$herdr" agent start "$agent_name" --kind "$agent_kind" --pane "$pane_id")
-[[ ${#agent_args[@]} -gt 0 ]] && start_cmd+=(-- "${agent_args[@]}")
 started=false
 start_err=''
-for _ in $(seq 1 30); do
-  if start_err=$("${start_cmd[@]}" 2>&1 >/dev/null); then
-    started=true
-    break
+printf '\033[2m» starting %s in %s\033[0m\n' "$agent_kind" "$ws_id"
+if [[ $agent_kind == opencode2 ]]; then
+  # Herdr's launcher names the stable executable `opencode`; launch the 2.0
+  # preview directly, then use Herdr's OpenCode detection and assign the name
+  # that the rest of dispatch addresses.
+  launch_cmd=(opencode2 mini)
+  [[ ${#agent_args[@]} -gt 0 ]] && launch_cmd+=("${agent_args[@]}")
+  if ! start_err=$("$herdr" pane run "$pane_id" "${launch_cmd[@]}" 2>&1 >/dev/null); then
+    die "agent start failed: $start_err"
   fi
-  sleep 0.5
-done
+  for _ in $(seq 1 60); do
+    detected=$("$herdr" agent get "$pane_id" 2>/dev/null \
+      | jq -r '.result.agent.agent // empty' 2>/dev/null)
+    if [[ $detected == opencode ]]; then
+      if start_err=$("$herdr" agent rename "$pane_id" "$agent_name" 2>&1 >/dev/null); then
+        started=true
+      fi
+      break
+    fi
+    sleep 0.5
+  done
+else
+  start_cmd=("$herdr" agent start "$agent_name" --kind "$agent_kind" --pane "$pane_id")
+  [[ ${#agent_args[@]} -gt 0 ]] && start_cmd+=(-- "${agent_args[@]}")
+  for _ in $(seq 1 30); do
+    if start_err=$("${start_cmd[@]}" 2>&1 >/dev/null); then
+      started=true
+      break
+    fi
+    sleep 0.5
+  done
+fi
 [[ $started == false ]] && die "agent start failed: $start_err"
 
 # A just-started agent can mishandle the first submission in two ways: a

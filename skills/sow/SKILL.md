@@ -18,15 +18,15 @@ task belongs to a different one.
 Always pass an explicit branch name and the prompt on stdin:
 
 ```bash
-sow --no-focus -b <branch-name> --agent <claude|codex> - <<'EOF'
+sow --no-focus -b <branch-name> --agent <claude|codex|opencode2> - <<'EOF'
 <self-contained task prompt>
 EOF
 ```
 
 - `--no-focus` keeps the user's focus where it is; Herdr shows a toast when the
   work lands. Omit it only when the user asks to switch to the new workspace.
-- `--agent` (or `--claude`/`--codex`): use the kind the user named; default to
-  the configured default (claude) otherwise.
+- `--agent` (or `--claude`/`--codex`/`--opencode2`): use the kind the user
+  named; default to the configured default (claude) otherwise.
 - `--repo PATH` dispatches into another repository: the worktree, workspace,
   and agent all land there, and a root workspace opens in the background if
   that repo has none. A task for another project is still a sow from right
@@ -37,14 +37,21 @@ EOF
 - `--model ID`, `--effort LEVEL`, `--speed fast|normal` set the agent's
   model, reasoning effort, and speed tier for this dispatch (codex: `-m`,
   `-c model_reasoning_effort=`, `-c service_tier=`; claude: `--model`,
-  `--effort`). Omitted flags keep the agent's configured defaults. When any
-  are passed, state the chosen settings in your dispatch report.
+  `--effort`; OpenCode 2: `opencode2 mini --model`). Omitted flags keep the
+  agent's configured defaults. When any are passed, state the chosen settings
+  in your dispatch report.
   - `--speed normal` on codex sets `service_tier=default` — the explicit
     sentinel that suppresses a model catalog's default tier. gpt-5.6-sol's
     catalog defaults to fast, so a codex dispatch that must not run fast
     needs `--speed normal`; leaving the flag off means fast.
   - claude has no fast-mode launch flag (`/fast` is an in-session toggle),
     so `--speed fast --claude` is rejected.
+  - OpenCode 2 encodes speed in model IDs. For example,
+    `--opencode2 --model xai/grok-4.6 --speed fast` resolves to
+    `xai/grok-4.6-fast`; `normal` selects the base ID. Pass `--model` with
+    `--speed`. OpenCode 2 has no `--effort` launch flag; choose the model
+    instead. `sow` validates the resolved ID with `opencode2 models` before
+    creating the worktree.
 
 After a codex launch with any of these flags, `sow` reads the live TUI
 footer (e.g. `gpt-5.6-sol high fast`) and verifies it against the request —

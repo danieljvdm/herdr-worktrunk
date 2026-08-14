@@ -44,6 +44,7 @@ fi
 # Grammar: @agent and branch-name: peel off the front, in either order.
 assert_preview 'branch: fix-login · agent: codex' "@codex fix-login: repair the login flow"
 assert_preview 'branch: fix-login · agent: codex' "fix-login: @codex repair the login flow"
+assert_preview 'branch: fix-login · agent: opencode2' "@opencode2 fix-login: repair the login flow"
 assert_preview 'branch: (model-named) · agent: claude' "@claude repair the login flow"
 assert_preview 'branch: (model-named) · agent: claude' "repair the login flow"
 
@@ -107,8 +108,26 @@ assert_settings_args \
 # way to suppress a model catalog's default_service_tier.
 assert_settings_args '-c service_tier=default' codex '' '' normal
 assert_settings_args '--model opus --effort xhigh' claude opus xhigh ''
+assert_settings_args '--model xai/grok-4.6' opencode2 xai/grok-4.6 '' ''
 assert_settings_args '' codex '' '' ''
 assert_settings_args '' claude '' '' normal   # no claude launch flag for speed
+
+# OpenCode 2 encodes speed in distinct model IDs.
+assert_opencode2_model() {
+  local expected=$1 model=$2 speed=$3 actual
+  actual=$(HERDR_PLUGIN_ROOT=$repo_root \
+    bash -c 'source "$1"; shift; opencode2_model_for_speed "$@"' _ "$dispatch_lib" \
+    "$model" "$speed")
+  if [[ $actual != "$expected" ]]; then
+    printf 'expected opencode2 model %q, got %q\n' "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
+assert_opencode2_model xai/grok-4.6-fast xai/grok-4.6 fast
+assert_opencode2_model xai/grok-4.6-fast xai/grok-4.6-fast fast
+assert_opencode2_model xai/grok-4.6 xai/grok-4.6-fast normal
+assert_opencode2_model xai/grok-4.6 xai/grok-4.6 normal
 
 # Footer verification: the live session is authoritative over the request.
 assert_mismatches() {

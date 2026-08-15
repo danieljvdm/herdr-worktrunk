@@ -11,19 +11,34 @@ trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 mkdir -p "$repo/.worktrees/one" "$repo/.worktrees/two" "$repo/.git/wt/trash/one-123"
 
-# Fake `wt`: serves a canned `list --format=json` (schema-1 array).
+# Current removal must not invoke Worktrunk's full-list path: that computes
+# status and integration metadata for every sibling worktree. Make any `wt`
+# call fail so these resolution tests protect the fast topology-only path.
 mkdir -p "$work/bin"
-cat > "$work/fixture.json" <<EOF
-[
-  {"kind": "worktree", "branch": "main", "path": "$repo", "is_main": true, "is_current": false},
-  {"kind": "worktree", "branch": "dan/one", "path": "$repo/.worktrees/one", "is_main": false, "is_current": true},
-  {"kind": "worktree", "branch": "dan/two", "path": "$repo/.worktrees/two", "is_main": false, "is_current": false}
-]
+cat > "$work/bin/wt" <<'EOF'
+#!/usr/bin/env bash
+printf 'remove_test: unexpected wt invocation: %s\n' "$*" >&2
+exit 99
 EOF
-cat > "$work/bin/wt" <<EOF
+# Fake `git`: emits the cheap topology data used by remove-current.
+cat > "$work/bin/git" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
-  *list*) cat "$work/fixture.json" ;;
+  *"worktree list --porcelain"*) cat <<'TOPOLOGY'
+worktree $repo
+HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/main
+
+worktree $repo/.worktrees/one
+HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+branch refs/heads/dan/one
+
+worktree $repo/.worktrees/two
+HEAD cccccccccccccccccccccccccccccccccccccccc
+branch refs/heads/dan/two
+
+TOPOLOGY
+    ;;
   *) exit 1 ;;
 esac
 EOF
@@ -36,7 +51,7 @@ case "\$*" in
   *) printf '{"result":{}}\n' ;;
 esac
 EOF
-chmod +x "$work/bin/wt" "$work/bin/herdr"
+chmod +x "$work/bin/wt" "$work/bin/git" "$work/bin/herdr"
 export PATH="$work/bin:$PATH"
 unset WORKTRUNK_REMOVE_CHECKOUT WORKTRUNK_REMOVE_WORKSPACE WORKTRUNK_REMOVE_WORKSPACE_LABEL HERDR_WORKSPACE_ID
 

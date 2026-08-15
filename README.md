@@ -116,6 +116,9 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   confirmation summary shows the branch, path, uncommitted-change count, any
   live agents in the workspace (with a red warning if one is still working),
   and the workspace that will close; `y` proceeds, anything else cancels.
+  The prompt resolves the pinned checkout from Git's lightweight worktree
+  topology rather than computing full Worktrunk status for every sibling, so
+  it stays fast even in repositories with many worktrees.
   Worktrunk still applies its dirty/unmerged safeguards. Non-interactive
   callers (agents reaping via `remove.sh --current`, or `--yes`) skip the
   confirmation. A pane whose shell survives an *interrupted* removal — its cwd

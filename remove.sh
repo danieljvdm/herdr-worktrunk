@@ -90,45 +90,78 @@ if [[ $remove_mode == picker ]] && ! command -v fzf >/dev/null; then
   fail "fzf not found on PATH"
 fi
 
-# List worktrees from the pinned checkout's repo when we have one; the pane's
-# own cwd may already be gone or point somewhere unrelated.
-list_dir=${pinned_checkout:-$PWD}
-if ! wtjson=$(wt -C "$list_dir" list --format=json 2>/dev/null); then
-  fail "failed to list worktrees (from $list_dir)"
-fi
-if ! wtitems=$(printf '%s\n' "$wtjson" | worktrunk_list_items); then
-  fail "unsupported worktrunk list output"
-fi
-
 if [[ $remove_mode == current ]]; then
-  # One jq pass for everything this mode needs: the primary checkout plus the
-  # pinned/current row. Process spawns cost ~200ms each under endpoint
-  # security on managed machines, so the hot path stays consolidated.
-  # Fields are joined with the unit separator: unlike tabs it is not
-  # IFS-whitespace, so empty fields survive the read.
-  resolved=$(printf '%s\n' "$wtitems" | jq -rs --arg pin "$pinned_checkout" '
-    (map(select(.kind == "worktree" and .is_main == true)) | first | .path // "") as $repo
-    | (map(select(.kind == "worktree"
-        and (if $pin != "" then .path == $pin else .is_current == true end)))
-       | first) as $t
-    | if $t == null then "\($repo)\u001f\u001f\u001fmissing"
-      else "\($repo)\u001f\($t.branch // "")\u001f\($t.path // "")\u001f\($t.is_main)" end')
-  IFS=$'\x1f' read -r repo_path name wtpath is_main <<<"$resolved"
-  [[ -z $repo_path ]] && repo_path=$PWD
+  # The confirmation only needs topology: the primary checkout plus the
+  # pinned/current worktree's path and branch. `wt list` also calculates status,
+  # divergence, integration, diffs, and dev-server state for every sibling
+  # worktree; that made this prompt take tens of seconds in repos with many
+  # worktrees. Raw git topology is sufficient here. `wt remove` still performs
+  # its own dirty/unmerged safety checks for the selected target below.
+  list_dir=${pinned_checkout:-$PWD}
+  topology_dir=$list_dir
+  if ! topology=$(git -c core.quotePath=false -C "$topology_dir" worktree list --porcelain 2>/dev/null); then
+    # A stale pin may already be gone. Fall back to the remover pane's cwd so we
+    # can distinguish "not registered" from "not a repository" without ever
+    # guessing a different target.
+    topology_dir=$PWD
+    if ! topology=$(git -c core.quotePath=false -C "$topology_dir" worktree list --porcelain 2>/dev/null); then
+      fail "failed to list git worktrees (from $list_dir)"
+    fi
+  fi
 
-  if [[ $is_main == missing ]]; then
+  repo_path="" wtpath="" name="" best_len=0
+  record_path="" record_branch=""
+  resolve_record() {
+    local record_len
+    [[ -n $record_path ]] || return
+    [[ -n $repo_path ]] || repo_path=$record_path
+
+    if [[ -n $pinned_checkout ]]; then
+      [[ $record_path == "$pinned_checkout" ]] || return
+    else
+      [[ $PWD == "$record_path" || $PWD == "$record_path/"* ]] || return
+      record_len=${#record_path}
+      ((record_len >= best_len)) || return
+      best_len=$record_len
+    fi
+    wtpath=$record_path
+    name=$record_branch
+  }
+
+  while IFS= read -r line; do
+    case $line in
+      "")
+        resolve_record
+        record_path="" record_branch=""
+        ;;
+      "worktree "*) record_path=${line#worktree } ;;
+      "branch refs/heads/"*) record_branch=${line#branch refs/heads/} ;;
+    esac
+  done <<<"$topology"
+  resolve_record
+
+  if [[ -z $wtpath ]]; then
     if [[ -n $pinned_checkout ]]; then
       fail "pinned worktree is not registered: $pinned_checkout"
     fi
     fail "could not resolve the current worktree"
   fi
-  if [[ $is_main == true ]]; then
+  if [[ $wtpath == "$repo_path" ]]; then
     printf '\033[33m%s\033[0m\n' "The primary worktree cannot be removed."
     [[ -t 0 ]] && sleep 2
     exit 0
   fi
   target=${name:-$wtpath}
 else
+  # The picker genuinely needs all worktree rows, including Worktrunk's status
+  # and safety metadata, so retain the full (and potentially slower) list here.
+  list_dir=${pinned_checkout:-$PWD}
+  if ! wtjson=$(wt -C "$list_dir" list --format=json 2>/dev/null); then
+    fail "failed to list worktrees (from $list_dir)"
+  fi
+  if ! wtitems=$(printf '%s\n' "$wtjson" | worktrunk_list_items); then
+    fail "unsupported worktrunk list output"
+  fi
   repo_path=$(printf '%s\n' "$wtitems" \
     | jq -r 'select(.kind == "worktree" and .is_main == true) | .path' \
     | head -n1)
@@ -157,7 +190,7 @@ fi
 # Native herdr workspace (if open) of the worktree we're about to remove.
 # The live path→workspace lookup is authoritative; the pinned workspace id
 # from the invoking action is the fallback when the lookup is unavailable.
-wsid=$("$herdr" worktree list --cwd "$list_dir" --json 2>/dev/null \
+wsid=$("$herdr" worktree list --cwd "$repo_path" --json 2>/dev/null \
   | jq -r --arg p "$wtpath" \
       '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty' \
   | head -n1)

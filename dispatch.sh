@@ -8,6 +8,15 @@
 # overridden (config key branch_name_command, else claude haiku, else a slug
 # of the text) — the task is the primitive, the branch is bookkeeping.
 #
+# With the config key task_classifier_command set, that same model call also
+# routes the dispatch: the command reads the full task text on stdin and
+# prints one JSON object {"branch", "agent", "model", "effort", "speed"}
+# (null/"" fields mean no opinion), so prose directives like "use codex
+# xhigh slow — …" reach the right agent without grammar or flags. Explicit
+# flags and grammar always win; the classifier only fills what they left
+# open, implausible fields are dropped, and a failed call falls back to the
+# branch_name_command chain.
+#
 # Usage: dispatch.sh [options] [--] <task text...>
 #        dispatch.sh [options] -            # read task text from stdin
 #
@@ -80,7 +89,10 @@ run_with_timeout() {
   shift
   "$@" &
   pid=$!
-  ( sleep "$secs"; kill "$pid" 2>/dev/null ) &
+  # The watcher must not inherit stdout: callers capture via $(…), and a
+  # pipe fd held by the watcher's sleep would block the substitution for
+  # the full budget even after the command itself has finished.
+  ( sleep "$secs"; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 &
   watcher=$!
   wait "$pid"
   rc=$?
@@ -105,11 +117,42 @@ name_branch_with_model() {
   else
     return 1
   fi
+  sanitize_branch_name "$out"
+}
+
+# Squeeze arbitrary model output into a plausible branch name: last line,
+# lowercased, non-branch characters collapsed to dashes, trimmed, capped at
+# 40 chars. Empty results are a failure, not an empty name.
+sanitize_branch_name() {
+  local out=$1
   out=$(printf '%s' "$out" | tail -n1 | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._/-' '-')
   out=$(printf '%s' "$out" | sed 's/^[^a-z0-9]*//; s/[^a-z0-9]*$//; s/-\{2,\}/-/g')
   out=${out:0:40}
   [[ -n $out ]] || return 1
   printf '%s\n' "$out"
+}
+
+# Run the configured task_classifier_command (task on stdin, one JSON object
+# on stdout) and fill the classifier_* globals with validated values only —
+# a field that fails validation degrades to no-opinion, never to a fatal
+# error, since classifier output is model output.
+run_task_classifier() {
+  local task=$1 cmd out fields
+  cmd=$(worktrunk_config_value task_classifier_command)
+  [[ -n $cmd ]] || return 1
+  out=$(printf '%s\n' "$task" | run_with_timeout 30 bash -c "$cmd" 2>/dev/null) || return 1
+  # Join on the unit separator, not @tsv: tab is IFS whitespace, so read
+  # would collapse adjacent tabs and shift fields past empty ones.
+  fields=$(printf '%s\n' "$out" | jq -r '
+    [.branch // "", .agent // "", .model // "", .effort // "", .speed // ""]
+    | join("\u001f")' 2>/dev/null) || return 1
+  IFS=$'\037' read -r classifier_branch classifier_agent classifier_model \
+    classifier_effort classifier_speed <<<"$fields"
+  classifier_branch=$(sanitize_branch_name "$classifier_branch" || true)
+  [[ $classifier_agent =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || classifier_agent=''
+  [[ $classifier_model =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ ]] || classifier_model=''
+  case $classifier_effort in minimal|low|medium|high|xhigh|max) ;; *) classifier_effort='' ;; esac
+  case $classifier_speed in fast|normal) ;; *) classifier_speed='' ;; esac
 }
 
 # Derive a branch name from task text: lowercase, alphanumeric words, minus
@@ -257,6 +300,39 @@ else
 fi
 [[ -z ${task// /} ]] && die "no task text given (see --help)"
 
+# One classifier call covers what flags and grammar left open: it names the
+# branch and routes prose directives ("use codex xhigh slow — …") onto
+# agent/model/effort/speed. Skipped when both the agent and the branch are
+# already settled — a fully-flagged dispatch (e.g. from the sow skill) pays
+# no model call here.
+classifier_branch='' classifier_agent='' classifier_model=''
+classifier_effort='' classifier_speed=''
+if [[ -n $(worktrunk_config_value task_classifier_command) ]] \
+  && [[ -z $agent_kind || ( -z $branch && -z ${WORKTRUNK_BRANCH_HINT:-} ) ]]; then
+  printf '\033[2m» classifying the task…\033[0m\n'
+  run_task_classifier "$task" || true
+  # Settings apply only where they can launch on the agent that will
+  # actually run; a routing guess never turns into a fatal flag combo.
+  candidate=${agent_kind:-${classifier_agent:-$(worktrunk_default_agent)}}
+  case $candidate in
+    codex|claude|opencode2) ;;
+    *) classifier_model='' classifier_effort='' classifier_speed='' ;;
+  esac
+  [[ $candidate == claude && $classifier_speed == fast ]] && classifier_speed=''
+  [[ $candidate == opencode2 ]] && classifier_effort=''
+  [[ $candidate == opencode2 && -z ${agent_model:-$classifier_model} ]] && classifier_speed=''
+  [[ -z $agent_kind && -n $classifier_agent ]] && agent_kind=$classifier_agent
+  [[ -z $agent_model && -n $classifier_model ]] && agent_model=$classifier_model
+  [[ -z $agent_effort && -n $classifier_effort ]] && agent_effort=$classifier_effort
+  [[ -z $agent_speed && -n $classifier_speed ]] && agent_speed=$classifier_speed
+  routed=''
+  [[ -n $classifier_agent ]] && routed+=" agent=$classifier_agent"
+  [[ -n $classifier_model ]] && routed+=" model=$classifier_model"
+  [[ -n $classifier_effort ]] && routed+=" effort=$classifier_effort"
+  [[ -n $classifier_speed ]] && routed+=" speed=$classifier_speed"
+  [[ -n $routed ]] && printf '\033[2m» routed:%s\033[0m\n' "$routed"
+fi
+
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
 if [[ -n $agent_model || -n $agent_effort || -n $agent_speed ]]; then
   case $agent_kind in
@@ -303,12 +379,17 @@ if [[ -n $repo ]]; then
 fi
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository: $PWD"
 
-# Branch: explicit > hint > named by a model from the task (slug of the task
-# text as last resort). A derived name that already exists gets a numeric
-# suffix — a new task deserves a new worktree.
+# Branch: explicit > hint > named by the classifier call above > named by a
+# model from the task (slug of the task text as last resort). A derived name
+# that already exists gets a numeric suffix — a new task deserves a new
+# worktree.
 derived=false
 if [[ -z $branch ]]; then
   branch=${WORKTRUNK_BRANCH_HINT:-}
+fi
+if [[ -z $branch && -n $classifier_branch ]]; then
+  branch=$classifier_branch
+  derived=true
 fi
 if [[ -z $branch ]]; then
   printf '\033[2m» naming the branch…\033[0m\n'
@@ -318,14 +399,14 @@ if [[ -z $branch ]]; then
     printf '\033[2m» model naming unavailable; falling back to: %s\033[0m\n' "$branch"
   fi
   derived=true
-  if worktrunk_ref_exists "$branch"; then
-    for i in 2 3 4 5 6 7 8 9; do
-      if ! worktrunk_ref_exists "$branch-$i"; then
-        branch="$branch-$i"
-        break
-      fi
-    done
-  fi
+fi
+if [[ $derived == true ]] && worktrunk_ref_exists "$branch"; then
+  for i in 2 3 4 5 6 7 8 9; do
+    if ! worktrunk_ref_exists "$branch-$i"; then
+      branch="$branch-$i"
+      break
+    fi
+  done
 fi
 
 # Existing refs and worktrunk shortcuts pass through to `wt switch` as-is;

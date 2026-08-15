@@ -71,6 +71,17 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   20s), the fallback is a slug of the task's first words. Model output is
   sanitized to a plausible branch name either way.
 
+  Prose routing: set `task_classifier_command` to a shell command that reads
+  the full task text on stdin and prints one JSON object
+  `{"branch", "agent", "model", "effort", "speed"}` (null/`""` fields mean
+  no opinion). One model call then both names the branch and routes prose
+  directives — "use codex xhigh slow — fix the flaky auth test" starts codex
+  at xhigh on the normal tier, no grammar or flags needed. Explicit flags
+  and `@agent` grammar always win; the classifier only fills what they left
+  open, implausible fields are dropped, and a failed or slow (>30s) call
+  falls back to the `branch_name_command` chain. A dispatch that already
+  names both its agent and its branch skips the call entirely.
+
   Focus: dispatch switches to the new workspace by default. Set
   `dispatch_focus = false` in the plugin config to keep working where you
   are — the workspace opens in the background and a notification announces

@@ -87,6 +87,37 @@ assert_named fix-auth "printf 'Fix Auth!\\n'"
 assert_named fix-auth "printf 'chatter\\nfix-auth\\n'"      # last line wins
 assert_named fix-auth "printf '  --fix-auth--  \\n'"        # trimmed + squeezed
 
+# task_classifier_command output is validated field-by-field: plausible
+# values land in the classifier_* globals, junk degrades to no-opinion.
+assert_classified() {
+  local expected=$1 json=$2
+  local out
+  printf '#!/usr/bin/env bash\nprintf %%s\\\\n %q\n' "$json" > "$config_dir/fake-classifier"
+  chmod +x "$config_dir/fake-classifier"
+  printf 'task_classifier_command = "%s"\n' "$config_dir/fake-classifier" \
+    > "$config_dir/config.toml"
+  out=$(HERDR_PLUGIN_CONFIG_DIR=$config_dir HERDR_PLUGIN_ROOT=$repo_root \
+    bash -c 'source "$1"
+      classifier_branch='' classifier_agent='' classifier_model=''
+      classifier_effort='' classifier_speed=''
+      run_task_classifier "task" || true
+      printf "%s|%s|%s|%s|%s" "$classifier_branch" "$classifier_agent" \
+        "$classifier_model" "$classifier_effort" "$classifier_speed"' \
+    _ "$dispatch_lib" 2>/dev/null)
+  if [[ $out != "$expected" ]]; then
+    printf 'expected classified %q for %q, got %q\n' "$expected" "$json" "$out" >&2
+    exit 1
+  fi
+}
+
+assert_classified 'fix-auth|codex|gpt-5.6-sol|xhigh|normal' \
+  '{"branch":"fix-auth","agent":"codex","model":"gpt-5.6-sol","effort":"xhigh","speed":"normal"}'
+assert_classified 'fix-auth|||xhigh|' \
+  '{"branch":"Fix Auth!","agent":null,"model":null,"effort":"xhigh","speed":"slow"}'
+assert_classified 'dan/fix-auth||||' \
+  '{"branch":"dan/fix-auth","agent":"Not An Agent","model":"-bad","effort":"ultra","speed":"warp"}'
+assert_classified '||||' 'not json at all'
+
 # --model/--effort/--speed map onto agent-specific launch arguments.
 assert_settings_args() {
   local expected=$1 kind=$2 model=$3 effort=$4 speed=$5

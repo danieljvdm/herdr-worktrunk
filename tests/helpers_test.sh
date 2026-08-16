@@ -120,4 +120,34 @@ if printf '%s\n' '{"schema":3}' | worktrunk_list_items >/dev/null 2>&1; then
   exit 1
 fi
 
+# worktrunk_git_worktree_items mirrors the wt-list item shape from git
+# porcelain output alone, and composes with the normalizing helpers.
+tmp_repo=$(cd "$(mktemp -d)" && pwd -P)   # resolve /var → /private/var up front
+trap 'rm -rf "$tmp_repo"' EXIT
+git -C "$tmp_repo" init -q -b main
+git -C "$tmp_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$tmp_repo" worktree add -q "$tmp_repo.feature" -b feature >/dev/null
+git -C "$tmp_repo" worktree add -q --detach "$tmp_repo.detached" >/dev/null
+
+items=$(cd "$tmp_repo" && worktrunk_git_worktree_items)
+summary=$(printf '%s\n' "$items" | jq -r '
+  [.[] | "\(.branch // "-"):\(.is_main)"] | sort | join(" ")')
+if [[ $summary != "-:false feature:false main:true" ]]; then
+  printf 'unexpected git worktree items summary: %q\n' "$summary" >&2
+  exit 1
+fi
+
+started=$(printf '%s\n' "$items" \
+  | worktrunk_started_worktree_path 'feature' '[]')
+if [[ $started != "$tmp_repo.feature" ]]; then
+  printf 'expected git items to resolve started worktree, got %q\n' "$started" >&2
+  exit 1
+fi
+
+paths=$(printf '%s\n' "$items" | worktrunk_list_worktree_paths_json)
+if [[ $(printf '%s\n' "$paths" | jq 'length') -ne 3 ]]; then
+  printf 'expected 3 worktree paths, got %q\n' "$paths" >&2
+  exit 1
+fi
+
 printf 'helpers tests passed\n'

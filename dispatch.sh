@@ -431,7 +431,7 @@ result=$(wt "${wtargs[@]}" --no-cd --format=json) \
 
 wtpath=$(printf '%s\n' "$result" | jq -r '.path // empty' 2>/dev/null)
 if [[ -z $wtpath ]]; then
-  wtpath=$(wt list --format=json 2>/dev/null \
+  wtpath=$(worktrunk_git_worktree_items \
     | worktrunk_list_items \
     | jq -r --arg b "$branch" 'select(.branch == $b and .kind == "worktree") | .path' \
     | head -n1)

@@ -60,6 +60,29 @@ worktrunk_list_worktree_paths_json() {
     | jq -sc '[.[] | select(.kind == "worktree" and .path != null) | .path]'
 }
 
+# The fast path to worktree locations: `wt list --format=json` computes
+# per-worktree status — seconds on a repo with dozens of worktrees, worse
+# under endpoint security — while `git worktree list --porcelain` answers in
+# milliseconds. Emits the same normalized shape worktrunk_list_items
+# produces, as one JSON array, so it composes with the helpers above.
+# is_current is never computed here; keep using wt list where it matters.
+worktrunk_git_worktree_items() {
+  git worktree list --porcelain 2>/dev/null | awk '
+    function flush() {
+      if (path != "") printf "%s\t%s\t%s\n", path, branch, main
+      path = ""; branch = ""
+    }
+    /^worktree /  { flush(); path = substr($0, 10); main = (n++ == 0) ? "1" : "" }
+    /^branch /    { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch) }
+    END { flush() }
+  ' | jq -Rsc '[split("\n")[] | select(length > 0) | split("\t")
+    | {kind: "worktree",
+       path: .[0],
+       branch: (if .[1] == "" then null else .[1] end),
+       is_main: (.[2] == "1"),
+       is_current: false}]'
+}
+
 # Read `wt list --format=json` on stdin and resolve the worktree that appeared
 # for a switch/create operation. Prefer an exact branch match; otherwise accept
 # exactly one path absent from the caller's pre-operation snapshot.

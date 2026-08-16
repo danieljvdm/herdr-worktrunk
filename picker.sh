@@ -47,7 +47,9 @@ branch_refs=(refs/heads refs/remotes)
 if command -v fzf >/dev/null; then
   choice=$(
     {
-      wt list --format=json 2>/dev/null \
+      # git porcelain, not `wt list`: the picker only needs branch names,
+      # and wt's per-worktree status pass takes seconds on big repos.
+      worktrunk_git_worktree_items \
         | worktrunk_list_items \
         | jq -r 'select(.branch != null) | .branch'
       # Drop origin/HEAD: its short form is bare "origin", so filter on the full
@@ -131,7 +133,7 @@ root_ws=$("$herdr" worktree list --cwd "$PWD" --json 2>/dev/null \
 
 # Snapshot existing paths so shortcuts and remote refs can still identify the
 # single new worktree they create even when their eventual branch name differs.
-before_paths=$(wt list --format=json 2>/dev/null \
+before_paths=$(worktrunk_git_worktree_items \
   | worktrunk_list_worktree_paths_json 2>/dev/null)
 [[ -z $before_paths ]] && before_paths='[]'
 
@@ -149,7 +151,7 @@ focus_setup_when_ready() {
   for ((attempt = 0; attempt < 200; attempt++)); do
     kill -0 "$parent_pid" 2>/dev/null || return 0
 
-    list_json=$(wt list --format=json 2>/dev/null) || true
+    list_json=$(worktrunk_git_worktree_items) || true
     wtpath=$(printf '%s\n' "$list_json" \
       | worktrunk_started_worktree_path "$branch" "$paths_before" 2>/dev/null) || true
 
@@ -198,7 +200,7 @@ trap - EXIT
 
 wtpath=$(printf '%s\n' "$result" | jq -r '.path // empty' 2>/dev/null)
 if [[ -z $wtpath ]]; then
-  wtpath=$(wt list --format=json 2>/dev/null \
+  wtpath=$(worktrunk_git_worktree_items \
     | worktrunk_list_items \
     | jq -r --arg b "$name" 'select(.branch == $b and .kind == "worktree") | .path' \
     | head -n1)

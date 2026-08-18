@@ -80,7 +80,7 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   normal tier, and needs no redundant agent or model-version spelling.
   Provider-unique families currently route `sol`/`terra`/`luna` and `gpt-*`
   to Codex, `opus`/`sonnet`/`haiku`/`fable` and `claude-*` to Claude, and
-  `grok-*`/`xai/*` to OpenCode 2. An explicitly contradictory agent/model
+  `grok`/`xai`/`grok-*`/`xai/*` to Grok Build. An explicitly contradictory agent/model
   pair fails before creating a worktree. Explicit flags
   and `@agent` grammar always win; the classifier only fills what they left
   open, implausible fields are dropped, and a failed or slow (>30s) call
@@ -98,8 +98,7 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   ```bash
   sow "fix the flaky token refresh in auth"        # branch + agent, one shot
   sow --codex "bump node to 22"                    # pick the agent
-  sow --opencode2 --model xai/grok-4.6 "..."       # OpenCode 2 + Grok 4.6
-  sow --opencode2 --model xai/grok-4.6 --speed fast "..."
+  sow --grok --model grok-4.6 "..."                # Grok Build + Grok 4.6
   sow --repo ~/dev/other-repo "fix the CI flake"   # dispatch into another repo
   sow --codex --effort xhigh --speed normal "..."  # pin the agent's settings
   sow -b fix-auth --no-focus - <<'EOF'             # scripted, prompt on stdin
@@ -114,7 +113,7 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   `--model`, `--effort`, and `--speed fast|normal` pass per-dispatch agent
   settings through to the launch (codex: `-m`, `-c model_reasoning_effort=`,
   `-c service_tier=`; claude: `--model`, `--effort`; OpenCode 2:
-  `opencode2 mini --model`). On OpenCode 2, speed is part of the model ID:
+  `opencode2 mini --model`; Grok Build: `-m`, `--reasoning-effort`). On OpenCode 2, speed is part of the model ID:
   `--model xai/grok-4.6 --speed fast` resolves to `xai/grok-4.6-fast`, while
   `normal` selects the base ID; `--speed` therefore requires `--model`, and
   `--effort` is unsupported. The resolved ID is checked against the live

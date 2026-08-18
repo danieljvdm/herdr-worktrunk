@@ -145,7 +145,10 @@ assert_model_route 'codex|gpt-5.7-sol' '' sol
 assert_model_route 'codex|gpt-5.6-luna' '' luna
 assert_model_route 'codex|gpt-5.6-terra' '' gpt-5.6-terra
 assert_model_route 'claude|opus' '' opus
-assert_model_route 'opencode2|xai/grok-4.6' '' xai/grok-4.6
+assert_model_route 'grok|grok-4.6' '' grok
+assert_model_route 'grok|grok-4.6' '' xai
+assert_model_route 'grok|grok-4.6' '' grok-4.6
+assert_model_route 'grok|grok-4.6' '' xai/grok-4.6
 
 if CODEX_HOME=$model_cache_dir HERDR_PLUGIN_ROOT=$repo_root \
   bash -c 'source "$1"; resolve_model_route claude sol' _ "$dispatch_lib" \
@@ -176,6 +179,7 @@ assert_settings_args \
 assert_settings_args '-c service_tier=default' codex '' '' normal
 assert_settings_args '--model opus --effort xhigh' claude opus xhigh ''
 assert_settings_args '--model xai/grok-4.6' opencode2 xai/grok-4.6 '' ''
+assert_settings_args '-m grok-4.6 --reasoning-effort high' grok grok-4.6 high normal
 assert_settings_args '' codex '' '' ''
 assert_settings_args '' claude '' '' normal   # no claude launch flag for speed
 

@@ -29,6 +29,7 @@
 #       --claude       shorthand for --agent claude
 #       --codex        shorthand for --agent codex
 #       --opencode2    shorthand for --agent opencode2
+#       --grok         shorthand for --agent grok (Grok Build)
 #   -b, --branch NAME  branch/worktree name (default: model-named from the task)
 #       --repo PATH    dispatch into this repository instead of the current
 #                      directory's; opens a root workspace for it if none is
@@ -36,13 +37,13 @@
 #       --base REF     base ref for a newly created branch (worktrunk syntax)
 #       --here         shorthand for --base @ (current branch)
 #       --model ID     launch the agent on this model (codex: -m ID,
-#                      claude/opencode2: --model ID)
+#                      claude/opencode2: --model ID; grok: -m ID)
 #       --effort LEVEL reasoning effort (codex: -c model_reasoning_effort=LEVEL,
 #                      claude: --effort LEVEL; unsupported by opencode2)
 #       --speed TIER   fast | normal. Codex maps this to service_tier.
 #                      OpenCode 2 maps the requested model between its base and
-#                      -fast catalog IDs (so it requires --model). Claude has no
-#                      fast-mode launch flag; normal is a no-op.
+#                      -fast catalog IDs (so it requires --model). Claude and
+#                      Grok Build have no fast-mode launch flag; normal is a no-op.
 #       --focus        switch to the new workspace when it opens
 #       --no-focus     open the workspace without stealing focus, and announce
 #                      via a herdr notification instead; the default comes
@@ -184,7 +185,7 @@ agent_kind_for_model() {
   case $model in
     sol|terra|luna|gpt-*) printf '%s\n' codex ;;
     opus|sonnet|haiku|fable|claude-*) printf '%s\n' claude ;;
-    grok-*|xai/*) printf '%s\n' opencode2 ;;
+    grok|xai|grok-*|xai/*) printf '%s\n' grok ;;
   esac
 }
 
@@ -214,6 +215,22 @@ canonical_model_id() {
           esac
         fi
         printf '%s\n' "$resolved"
+        return
+        ;;
+    esac
+  fi
+  if [[ $kind == grok ]]; then
+    case $lower in
+      grok|xai)
+        if command -v grok >/dev/null 2>&1; then
+          resolved=$(grok models 2>/dev/null \
+            | sed -n 's/^Default model: //p' | head -n1)
+        fi
+        printf '%s\n' "${resolved:-grok-4.6}"
+        return
+        ;;
+      xai/*)
+        printf '%s\n' "${model#*/}"
         return
         ;;
     esac
@@ -259,6 +276,10 @@ agent_settings_args() {
       ;;
     opencode2)
       [[ -n $model ]] && printf '%s\n' --model "$model"
+      ;;
+    grok)
+      [[ -n $model ]] && printf '%s\n' -m "$model"
+      [[ -n $effort ]] && printf '%s\n' --reasoning-effort "$effort"
       ;;
   esac
   return 0
@@ -324,7 +345,7 @@ stdin_task=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     -a|--agent) agent_kind=${2:?--agent needs a kind}; shift 2 ;;
-    --claude|--codex|--opencode2) agent_kind=${1#--}; shift ;;
+    --claude|--codex|--opencode2|--grok) agent_kind=${1#--}; shift ;;
     -b|--branch) branch=${2:?--branch needs a name}; shift 2 ;;
     --repo|-C) repo=${2:?--repo needs a path}; shift 2 ;;
     --pick-repo) pick_repo=true; shift ;;
@@ -383,10 +404,10 @@ if [[ -n $(worktrunk_config_value task_classifier_command) ]] \
   fi
   [[ -z $candidate ]] && candidate=$(worktrunk_default_agent)
   case $candidate in
-    codex|claude|opencode2) ;;
+    codex|claude|opencode2|grok) ;;
     *) classifier_model='' classifier_effort='' classifier_speed='' ;;
   esac
-  [[ $candidate == claude && $classifier_speed == fast ]] && classifier_speed=''
+  [[ $candidate =~ ^(claude|grok)$ && $classifier_speed == fast ]] && classifier_speed=''
   [[ $candidate == opencode2 ]] && classifier_effort=''
   [[ $candidate == opencode2 && -z ${agent_model:-$classifier_model} ]] && classifier_speed=''
   [[ -z $agent_kind && -n $classifier_agent ]] && agent_kind=$classifier_agent
@@ -417,11 +438,13 @@ fi
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
 if [[ -n $agent_model || -n $agent_effort || -n $agent_speed ]]; then
   case $agent_kind in
-    codex|claude|opencode2) ;;
-    *) die "--model/--effort/--speed are only wired up for codex, claude, and opencode2, not: $agent_kind" ;;
+    codex|claude|opencode2|grok) ;;
+    *) die "--model/--effort/--speed are only wired up for codex, claude, opencode2, and grok, not: $agent_kind" ;;
   esac
   [[ $agent_kind == claude && $agent_speed == fast ]] \
     && die "claude has no fast-mode launch flag (/fast is an in-session toggle); drop --speed fast"
+  [[ $agent_kind == grok && $agent_speed == fast ]] \
+    && die "Grok Build has no fast-mode launch flag; drop --speed fast"
   [[ $agent_kind == opencode2 && -n $agent_effort ]] \
     && die "opencode2 has no reasoning-effort launch flag; choose a model instead"
   if [[ $agent_kind == opencode2 && -n $agent_speed ]]; then

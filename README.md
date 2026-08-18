@@ -75,8 +75,13 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   the full task text on stdin and prints one JSON object
   `{"branch", "agent", "model", "effort", "speed"}` (null/`""` fields mean
   no opinion). One model call then both names the branch and routes prose
-  directives — "use codex xhigh slow — fix the flaky auth test" starts codex
-  at xhigh on the normal tier, no grammar or flags needed. Explicit flags
+  directives — "use sol max slow — fix the flaky auth test" resolves `sol`
+  to the current versioned Codex model, starts Codex at max effort on the
+  normal tier, and needs no redundant agent or model-version spelling.
+  Provider-unique families currently route `sol`/`terra`/`luna` and `gpt-*`
+  to Codex, `opus`/`sonnet`/`haiku`/`fable` and `claude-*` to Claude, and
+  `grok-*`/`xai/*` to OpenCode 2. An explicitly contradictory agent/model
+  pair fails before creating a worktree. Explicit flags
   and `@agent` grammar always win; the classifier only fills what they left
   open, implausible fields are dropped, and a failed or slow (>30s) call
   falls back to the `branch_name_command` chain. A dispatch that already

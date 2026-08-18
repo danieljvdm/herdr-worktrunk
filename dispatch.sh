@@ -11,8 +11,10 @@
 # With the config key task_classifier_command set, that same model call also
 # routes the dispatch: the command reads the full task text on stdin and
 # prints one JSON object {"branch", "agent", "model", "effort", "speed"}
-# (null/"" fields mean no opinion), so prose directives like "use codex
-# xhigh slow — …" reach the right agent without grammar or flags. Explicit
+# (null/"" fields mean no opinion), so prose directives like "use sol max
+# slow — …" reach the right agent without grammar or flags. Unique model
+# names imply their owning agent, and short Codex family names are resolved
+# against the live model catalog. Explicit
 # flags and grammar always win; the classifier only fills what they left
 # open, implausible fields are dropped, and a failed call falls back to the
 # branch_name_command chain.
@@ -172,6 +174,68 @@ worktrunk_slug() {
   printf '%s\n' "${out:0:40}"
 }
 
+# Model names are provider identities, not portable strings. Route the unique
+# families before applying default_agent so callers can say "sol", "luna",
+# "opus", or "grok-4.6" without redundantly naming the agent. Unknown model
+# IDs remain unrouted and are left to an explicitly selected/default agent.
+agent_kind_for_model() {
+  local model
+  model=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case $model in
+    sol|terra|luna|gpt-*) printf '%s\n' codex ;;
+    opus|sonnet|haiku|fable|claude-*) printf '%s\n' claude ;;
+    grok-*|xai/*) printf '%s\n' opencode2 ;;
+  esac
+}
+
+# Codex's public catalog uses versioned IDs while people naturally use the
+# stable family names. Prefer the highest-priority visible catalog entry so a
+# future gpt version does not require changing sow; retain the current IDs as
+# an offline/startup fallback when the cache has not been populated yet.
+canonical_model_id() {
+  local kind=$1 model=$2 lower cache resolved=''
+  lower=$(printf '%s' "$model" | tr '[:upper:]' '[:lower:]')
+  if [[ $kind == codex ]]; then
+    case $lower in
+      sol|terra|luna)
+        cache=${CODEX_HOME:-$HOME/.codex}/models_cache.json
+        if [[ -f $cache ]]; then
+          resolved=$(jq -r --arg suffix "-$lower" '
+            [.models[]?
+              | select((.slug | endswith($suffix)) and (.visibility // "list") == "list")]
+            | sort_by(.priority // 999999)
+            | first.slug // empty' "$cache" 2>/dev/null) || resolved=''
+        fi
+        if [[ -z $resolved ]]; then
+          case $lower in
+            sol) resolved=gpt-5.6-sol ;;
+            terra) resolved=gpt-5.6-terra ;;
+            luna) resolved=gpt-5.6-luna ;;
+          esac
+        fi
+        printf '%s\n' "$resolved"
+        return
+        ;;
+    esac
+  fi
+  printf '%s\n' "$model"
+}
+
+# Print KIND<unit-separator>MODEL after applying provider inference and alias
+# expansion. An explicit contradictory agent is an error instead of a doomed
+# session that appears to have launched successfully.
+resolve_model_route() {
+  local kind=$1 model=$2 owner canonical
+  owner=$(agent_kind_for_model "$model")
+  if [[ -n $kind && -n $owner && $kind != "$owner" ]]; then
+    printf 'model %s belongs to %s, not %s\n' "$model" "$owner" "$kind" >&2
+    return 2
+  fi
+  [[ -z $kind ]] && kind=$owner
+  canonical=$(canonical_model_id "$kind" "$model")
+  printf '%s\037%s\n' "$kind" "$canonical"
+}
+
 # Map the portable --model/--effort/--speed flags onto agent-specific launch
 # arguments, one per line (empty flags emit nothing). Codex speed maps to the
 # top-level service_tier config key: "fast" is the fast/priority tier, and
@@ -313,7 +377,11 @@ if [[ -n $(worktrunk_config_value task_classifier_command) ]] \
   run_task_classifier "$task" || true
   # Settings apply only where they can launch on the agent that will
   # actually run; a routing guess never turns into a fatal flag combo.
-  candidate=${agent_kind:-${classifier_agent:-$(worktrunk_default_agent)}}
+  candidate=${agent_kind:-${classifier_agent:-}}
+  if [[ -z $candidate && -n $classifier_model ]]; then
+    candidate=$(agent_kind_for_model "$classifier_model")
+  fi
+  [[ -z $candidate ]] && candidate=$(worktrunk_default_agent)
   case $candidate in
     codex|claude|opencode2) ;;
     *) classifier_model='' classifier_effort='' classifier_speed='' ;;
@@ -331,6 +399,19 @@ if [[ -n $(worktrunk_config_value task_classifier_command) ]] \
   [[ -n $classifier_effort ]] && routed+=" effort=$classifier_effort"
   [[ -n $classifier_speed ]] && routed+=" speed=$classifier_speed"
   [[ -n $routed ]] && printf '\033[2m» routed:%s\033[0m\n' "$routed"
+fi
+
+if [[ -n $agent_model ]]; then
+  requested_model=$agent_model
+  route=$(resolve_model_route "$agent_kind" "$agent_model") \
+    || die "agent/model mismatch: $agent_kind / $agent_model"
+  IFS=$'\037' read -r agent_kind agent_model <<<"$route"
+  if [[ $requested_model != "$agent_model" ]]; then
+    printf '\033[2m» model alias: %s → %s (%s)\033[0m\n' \
+      "$requested_model" "$agent_model" "$agent_kind"
+  elif [[ -n $agent_kind ]]; then
+    printf '\033[2m» model owner: %s → %s\033[0m\n' "$agent_model" "$agent_kind"
+  fi
 fi
 
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)

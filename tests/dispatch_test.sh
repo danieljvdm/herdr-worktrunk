@@ -118,6 +118,42 @@ assert_classified 'dan/fix-auth||||' \
   '{"branch":"dan/fix-auth","agent":"Not An Agent","model":"-bad","effort":"ultra","speed":"warp"}'
 assert_classified '||||' 'not json at all'
 
+# Bare, provider-unique model families select their agent before the configured
+# default can misroute them. This is the regression for "use sol max slow"
+# accidentally launching `claude --model sol --effort max`.
+model_cache_dir=$config_dir/codex-home
+mkdir -p "$model_cache_dir"
+printf '%s\n' '{"models":[
+  {"slug":"gpt-5.6-sol","visibility":"list","priority":2},
+  {"slug":"gpt-5.7-sol","visibility":"list","priority":1},
+  {"slug":"gpt-5.6-luna","visibility":"list","priority":1}
+]}' > "$model_cache_dir/models_cache.json"
+
+assert_model_route() {
+  local expected=$1 kind=$2 model=$3 actual
+  actual=$(CODEX_HOME=$model_cache_dir HERDR_PLUGIN_ROOT=$repo_root \
+    bash -c 'source "$1"; shift; resolve_model_route "$@"' _ "$dispatch_lib" \
+    "$kind" "$model" | tr $'\037' '|')
+  if [[ $actual != "$expected" ]]; then
+    printf 'expected model route %q for %q/%q, got %q\n' \
+      "$expected" "$kind" "$model" "$actual" >&2
+    exit 1
+  fi
+}
+
+assert_model_route 'codex|gpt-5.7-sol' '' sol
+assert_model_route 'codex|gpt-5.6-luna' '' luna
+assert_model_route 'codex|gpt-5.6-terra' '' gpt-5.6-terra
+assert_model_route 'claude|opus' '' opus
+assert_model_route 'opencode2|xai/grok-4.6' '' xai/grok-4.6
+
+if CODEX_HOME=$model_cache_dir HERDR_PLUGIN_ROOT=$repo_root \
+  bash -c 'source "$1"; resolve_model_route claude sol' _ "$dispatch_lib" \
+  >/dev/null 2>&1; then
+  printf 'expected claude/sol to fail before launch\n' >&2
+  exit 1
+fi
+
 # --model/--effort/--speed map onto agent-specific launch arguments.
 assert_settings_args() {
   local expected=$1 kind=$2 model=$3 effort=$4 speed=$5

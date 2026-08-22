@@ -48,7 +48,9 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   `some-branch-name:` to pick the branch yourself, or
   `>repo` (a path, or the name of any repo with a pane open) to target
   another repository. Set `default_agent = "codex"` in the plugin config to
-  change the default agent (claude). Inside the switch/create pickers,
+  change the default agent (claude). Set `disabled_agents = "claude"` to
+  reject Claude dispatches and skip Claude when naming branches. Separate
+  multiple disabled agents with commas. Inside the switch/create pickers,
   `ctrl-o` promotes the highlighted or typed branch into the same composer.
 
   Images: paste them. herdr intercepts image pastes in any pane, saves the
@@ -78,8 +80,9 @@ opens as a tab or a native worktree workspace according to plugin configuration.
   directives — "use sol max slow — fix the flaky auth test" resolves `sol`
   to the current versioned Codex model, starts Codex at max effort on the
   normal tier, and needs no redundant agent or model-version spelling.
-  Provider-unique families currently route `sol`/`terra`/`luna` and `gpt-*`
-  to Codex, `opus`/`sonnet`/`haiku`/`fable` and `claude-*` to Claude, and
+  Provider-unique families currently route `sol`/`solstice`/`terra`/`luna`
+  and `gpt-*` to Codex, `opus`/`sonnet`/`haiku`/`fable` and `claude-*` to
+  Claude, and
   `grok`/`xai`/`grok-*`/`xai/*` to Grok Build. An explicitly contradictory agent/model
   pair fails before creating a worktree. Explicit flags
   and `@agent` grammar always win; the classifier only fills what they left

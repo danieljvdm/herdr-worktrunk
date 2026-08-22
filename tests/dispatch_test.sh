@@ -114,8 +114,10 @@ assert_classified 'fix-auth|codex|gpt-5.6-sol|xhigh|normal' \
   '{"branch":"fix-auth","agent":"codex","model":"gpt-5.6-sol","effort":"xhigh","speed":"normal"}'
 assert_classified 'fix-auth|||xhigh|' \
   '{"branch":"Fix Auth!","agent":null,"model":null,"effort":"xhigh","speed":"slow"}'
+assert_classified 'dan/simplify-dev|codex|solstice-alpha|ultra|normal' \
+  '{"branch":"dan/simplify-dev","agent":"codex","model":"solstice-alpha","effort":"ultra","speed":"normal"}'
 assert_classified 'dan/fix-auth||||' \
-  '{"branch":"dan/fix-auth","agent":"Not An Agent","model":"-bad","effort":"ultra","speed":"warp"}'
+  '{"branch":"dan/fix-auth","agent":"Not An Agent","model":"-bad","effort":"maximum","speed":"warp"}'
 assert_classified '||||' 'not json at all'
 
 # Bare, provider-unique model families select their agent before the configured
@@ -142,6 +144,8 @@ assert_model_route() {
 }
 
 assert_model_route 'codex|gpt-5.7-sol' '' sol
+assert_model_route 'codex|solstice-alpha' '' solstice
+assert_model_route 'codex|solstice-alpha' '' solstice-alpha
 assert_model_route 'codex|gpt-5.6-luna' '' luna
 assert_model_route 'codex|gpt-5.6-terra' '' gpt-5.6-terra
 assert_model_route 'claude|opus' '' opus
@@ -177,6 +181,9 @@ assert_settings_args \
 # normal is the explicit `default` sentinel, not an absent key — the only
 # way to suppress a model catalog's default_service_tier.
 assert_settings_args '-c service_tier=default' codex '' '' normal
+assert_settings_args \
+  '-m solstice-alpha -c model_reasoning_effort=ultra -c service_tier=default' \
+  codex solstice-alpha ultra normal
 assert_settings_args '--model opus --effort xhigh' claude opus xhigh ''
 assert_settings_args '--model xai/grok-4.6' opencode2 xai/grok-4.6 '' ''
 assert_settings_args '-m grok-4.6 --reasoning-effort high' grok grok-4.6 high normal
@@ -218,6 +225,7 @@ assert_mismatches '' "$footer" gpt-5.6-sol high fast
 assert_mismatches 'speed normal (session is fast)' "$footer" gpt-5.6-sol high normal
 assert_mismatches 'effort xhigh' "$footer" '' xhigh ''
 assert_mismatches '' 'gpt-5.6-sol ultra' '' xhigh ''     # sol shows xhigh as ultra
+assert_mismatches '' 'solstice-alpha ultra' solstice-alpha ultra normal
 assert_mismatches 'model gpt-5.6-sol' 'gpt-5.5-codex high fast' gpt-5.6-sol '' ''
 assert_mismatches '' 'gpt-5.6-sol high' gpt-5.6-sol high normal
 # "fast" must match as a word, not inside e.g. a branch named fastlane.
@@ -226,6 +234,15 @@ assert_mismatches 'speed fast' 'gpt-5.6-sol high · fastlane-fix' '' '' fast
 # --speed rejects anything but fast/normal.
 if bash "$dispatch" --speed sluggish --slug "fix auth" >/dev/null 2>&1; then
   printf 'expected --speed to reject unknown tiers\n' >&2
+  exit 1
+fi
+
+printf 'default_agent = "codex"\ndisabled_agents = "claude"\n' \
+  > "$config_dir/config.toml"
+if HERDR_PLUGIN_CONFIG_DIR=$config_dir \
+  bash "$dispatch" --claude -b blocked-agent "repair the login flow" \
+  >/dev/null 2>&1; then
+  printf 'expected disabled Claude dispatch to fail before creating a worktree\n' >&2
   exit 1
 fi
 

@@ -113,7 +113,8 @@ name_branch_with_model() {
   cmd=$(worktrunk_config_value branch_name_command)
   if [[ -n $cmd ]]; then
     out=$(printf '%s\n' "$task" | run_with_timeout 20 bash -c "$cmd" 2>/dev/null)
-  elif command -v claude >/dev/null 2>&1; then
+  elif ! worktrunk_agent_is_disabled claude \
+    && command -v claude >/dev/null 2>&1; then
     out=$(printf 'Task: %s\n' "$task" | run_with_timeout 20 claude --model haiku -p \
       'Reply with only a kebab-case git branch name (two to four words, lowercase letters/digits/dashes, max 40 chars) that describes this task. No quotes, no explanation, nothing else.' \
       2>/dev/null)
@@ -154,7 +155,7 @@ run_task_classifier() {
   classifier_branch=$(sanitize_branch_name "$classifier_branch" || true)
   [[ $classifier_agent =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || classifier_agent=''
   [[ $classifier_model =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ ]] || classifier_model=''
-  case $classifier_effort in minimal|low|medium|high|xhigh|max) ;; *) classifier_effort='' ;; esac
+  case $classifier_effort in minimal|low|medium|high|xhigh|max|ultra) ;; *) classifier_effort='' ;; esac
   case $classifier_speed in fast|normal) ;; *) classifier_speed='' ;; esac
 }
 
@@ -183,7 +184,7 @@ agent_kind_for_model() {
   local model
   model=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   case $model in
-    sol|terra|luna|gpt-*) printf '%s\n' codex ;;
+    sol|solstice|solstice-*|terra|luna|gpt-*) printf '%s\n' codex ;;
     opus|sonnet|haiku|fable|claude-*) printf '%s\n' claude ;;
     grok|xai|grok-*|xai/*) printf '%s\n' grok ;;
   esac
@@ -198,6 +199,10 @@ canonical_model_id() {
   lower=$(printf '%s' "$model" | tr '[:upper:]' '[:lower:]')
   if [[ $kind == codex ]]; then
     case $lower in
+      solstice|solstice-alpha)
+        printf '%s\n' solstice-alpha
+        return
+        ;;
       sol|terra|luna)
         cache=${CODEX_HOME:-$HOME/.codex}/models_cache.json
         if [[ -f $cache ]]; then
@@ -436,6 +441,8 @@ if [[ -n $agent_model ]]; then
 fi
 
 [[ -z $agent_kind ]] && agent_kind=$(worktrunk_default_agent)
+worktrunk_agent_is_disabled "$agent_kind" \
+  && die "agent $agent_kind is disabled in the worktrunk plugin config"
 if [[ -n $agent_model || -n $agent_effort || -n $agent_speed ]]; then
   case $agent_kind in
     codex|claude|opencode2|grok) ;;

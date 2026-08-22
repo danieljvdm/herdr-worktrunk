@@ -75,6 +75,15 @@ worktrunk_default_agent() {
   fi
 }
 
+# Return success when the agent appears in the comma-separated denylist.
+worktrunk_agent_is_disabled() {
+  local agent=$1 disabled
+
+  disabled=$(worktrunk_config_value disabled_agents)
+  disabled=${disabled//[[:space:]]/}
+  [[ ",$disabled," == *",$agent,"* ]]
+}
+
 # Print "true"/"false" for whether dispatch.sh focuses the new worktree
 # workspace. Focused by default; set dispatch_focus = false to keep working
 # where you are and get a notification instead. The --focus / --no-focus

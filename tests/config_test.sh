@@ -72,4 +72,12 @@ assert_dispatch_focus false
 printf 'dispatch_focus = "banana"\n' > "$config_dir/config.toml"
 assert_dispatch_focus true
 
+printf 'disabled_agents = "claude, grok"\n' > "$config_dir/config.toml"
+worktrunk_agent_is_disabled claude
+worktrunk_agent_is_disabled grok
+if worktrunk_agent_is_disabled codex; then
+  printf 'expected codex to remain enabled\n' >&2
+  exit 1
+fi
+
 printf 'config tests passed\n'

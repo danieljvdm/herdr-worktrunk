@@ -76,4 +76,20 @@ herdr plugin link "$PWD"
 for test in tests/*_test.sh; do bash "$test" || exit; done
 ```
 
+## Releases
+
+Version each plugin independently. Bump the patch for fixes and the minor for
+features or breaking changes while the plugin is pre-1.0. Set the version in
+`herdr-plugin.toml`, run the tests above, and commit the release changes.
+Tag that commit as `vX.Y.Z` and push the branch and tag together:
+
+```sh
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push --atomic origin main vX.Y.Z
+```
+
+Install a tagged release with `herdr plugin install danieljvdm/herdr-worktrunk --ref vX.Y.Z`.
+Re-run install with the next tag to upgrade a GitHub-managed installation.
+Local links use the working checkout. Never move a published release tag.
+
 [MIT license](LICENSE.md).

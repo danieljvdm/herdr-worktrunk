@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+
+# True when NAME is a token worktrunk resolves itself — a branch shortcut
+# (^ default, - previous) or `:` syntax (pr:N, mr:N, or a PR/MR URL). Git branch
+# names can't be these bare symbols or contain `:`, so these must be passed to
+# `wt switch` as-is, never with --create. `@` (current) is omitted: switching to
+# the current worktree is a no-op, and its only real use is as a --base.
+worktrunk_is_shortcut() {
+  case $1 in
+    '^'|'-'|*:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# True when NAME is an existing local branch or remote-tracking branch. Such refs
+# are checked out directly by `wt switch NAME` (worktrunk creates the worktree if
+# one doesn't exist yet), so they must never be passed with --create.
+worktrunk_ref_exists() {
+  git show-ref --quiet --verify "refs/heads/$1" \
+    || git show-ref --quiet --verify "refs/remotes/$1"
+}
+
+# Emit one worktrunk list item per line with the schema 1 location fields
+# (`kind`, `path`, and `is_main`) available at the top level. Worktrunk's JSON
+# schema 2 wraps items in an envelope and nests those fields under `worktree`.
+worktrunk_list_items() {
+  jq -c '
+    def normalize:
+      . + {
+        kind: (.kind // (if (.worktree | type) == "object" then "worktree" else "branch" end)),
+        path: (.path // .worktree.path // null),
+        is_main: (.is_main // .worktree.main // false),
+        is_current: (.is_current // .worktree.current // false)
+      };
+
+    if type == "array" then
+      .[] | normalize
+    elif type == "object" and ((.items | type) == "array") then
+      .items[] | normalize
+    else
+      error("unsupported worktrunk list JSON schema")
+    end
+  '
+}
+
+# Read `wt list --format=json` on stdin and return the paths of all worktrees as
+# a JSON array. The snapshot lets a caller recognize a newly registered
+# worktree even when the requested token is a shortcut or remote ref whose
+# eventual local branch name differs.
+worktrunk_list_worktree_paths_json() {
+  worktrunk_list_items \
+    | jq -sc '[.[] | select(.kind == "worktree" and .path != null) | .path]'
+}
+
+# The fast path to worktree locations: `wt list --format=json` computes
+# per-worktree status — seconds on a repo with dozens of worktrees, worse
+# under endpoint security — while `git worktree list --porcelain` answers in
+# milliseconds. Emits the same normalized shape worktrunk_list_items
+# produces, as one JSON array, so it composes with the helpers above.
+# is_current is never computed here; keep using wt list where it matters.
+worktrunk_git_worktree_items() {
+  git worktree list --porcelain 2>/dev/null | awk '
+    function flush() {
+      if (path != "") printf "%s\t%s\t%s\n", path, branch, main
+      path = ""; branch = ""
+    }
+    /^worktree /  { flush(); path = substr($0, 10); main = (n++ == 0) ? "1" : "" }
+    /^branch /    { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch) }
+    END { flush() }
+  ' | jq -Rsc '[split("\n")[] | select(length > 0) | split("\t")
+    | {kind: "worktree",
+       path: .[0],
+       branch: (if .[1] == "" then null else .[1] end),
+       is_main: (.[2] == "1"),
+       is_current: false}]'
+}
+
+# Read `wt list --format=json` on stdin and resolve the worktree that appeared
+# for a switch/create operation. Prefer an exact branch match; otherwise accept
+# exactly one path absent from the caller's pre-operation snapshot.
+worktrunk_started_worktree_path() {
+  local branch=$1 before_paths=${2:-[]}
+
+  worktrunk_list_items \
+    | jq -sr --arg branch "$branch" --argjson before "$before_paths" '
+        (map(select(.kind == "worktree" and .branch == $branch)) | first | .path)
+        //
+        ([.[]
+          | select(.kind == "worktree" and .path != null)
+          | select(.path as $path | ($before | index($path)) == null)]
+         | if length == 1 then .[0].path else empty end)
+      '
+}
+

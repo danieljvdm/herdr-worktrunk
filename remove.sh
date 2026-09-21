@@ -247,6 +247,9 @@ fi
 # a 4.5GB node_modules to unlink is what made reap feel broken.
 # Fail with a real exit code for scripted callers (agents reaping their own
 # session via `remove.sh --current`); only block for a keypress on a TTY.
+# -C changes wt's cwd only. Move this script too, before the process hook
+# captures checkout owners, so it survives long enough to close the workspace.
+cd "$repo_path" || fail "cannot enter primary checkout: $repo_path"
 if ! wt -C "$repo_path" remove "$target"; then
   printf '\n\033[31m%s\033[0m' "wt remove failed (see above)."
   if [[ -t 0 ]]; then
@@ -256,7 +259,6 @@ if ! wt -C "$repo_path" remove "$target"; then
   printf '\n'
   exit 1
 fi
-cd "$repo_path" 2>/dev/null || true
 
 # Close a native worktree workspace as a unit. Fall back to pane cleanup for the
 # original tab-based mode and worktrees opened by older plugin versions.

@@ -46,6 +46,8 @@ description = "Worktree: remove current"
 Cleanup pins the target when invoked, shows its branch, path, pending changes,
 and live agents, then calls `wt remove`. Worktrunk's removal safeguards still
 apply. A successful removal closes the associated workspace or checkout panes.
+Worktrunk owns removal and its teardown hooks; Herdr owns closing the workspace.
+A pane already pointing into Worktrunk’s trash only needs workspace closure.
 
 `bin/reap` invokes the same cleanup from a shell. It closes every pane in the
 target workspace, including its caller. Use it only when that worktree is ready

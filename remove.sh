@@ -44,11 +44,10 @@ pinned_ws_label=${WORKTRUNK_REMOVE_WORKSPACE_LABEL:-}
 fail() { printf '\033[31m%s\033[0m\n' "$1"; [[ -t 0 ]] && sleep 2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# Interrupted-removal recovery. `wt remove` moves a worktree to
-# .git/wt/trash/<name>-<epoch> before deleting it; if the removal is stopped
-# in between (an agent interrupting it, a crash), the surviving shell keeps
-# its cwd inside the trash copy. Resolving "the current worktree" from there
-# can never work — recognize it, explain, and offer to finish the cleanup.
+# A surviving pane can have its cwd in Worktrunk's trash after removal.
+# The checkout is already detached: only close its workspace here. Worktrunk
+# owns process teardown through its hooks and physical trash disposal; do not
+# implement a second removal path that bypasses those lifecycle rules.
 # ---------------------------------------------------------------------------
 trash_source=""
 for candidate in "$pinned_checkout" "$PWD"; do
@@ -68,19 +67,18 @@ if [[ -n $trash_source && $remove_mode == current ]]; then
     exit 0
   fi
 
-  printf '\033[33m%s\033[0m\n' "This pane survives an interrupted 'wt remove':"
-  printf '  its shell lives in the trashed copy of an already-removed worktree.\n'
+  printf '\033[33m%s\033[0m\n' "This worktree has already been removed:"
+  printf '  this pane still points into the Worktrunk trash directory.\n'
   printf '    \033[2m%s\033[0m\n\n' "$trash_dir"
   if [[ ! -t 0 && $assume_yes == 0 ]]; then
-    printf 'rerun with --yes to delete the trash copy and close this workspace\n'
+    printf 'rerun with --yes to close this workspace\n'
     exit 1
   fi
   if ((! assume_yes)); then
-    printf 'Delete the trash copy and close this workspace? [y/N] '
+    printf 'Close this workspace? [y/N] '
     read -r -n1 answer; printf '\n'
     [[ $answer == [yY] ]] || exit 0
   fi
-  rm -rf "$trash_dir"
   wsid=${pinned_ws:-${HERDR_WORKSPACE_ID:-}}
   [[ -n $wsid ]] && "$herdr" workspace close "$wsid"
   exit 0
